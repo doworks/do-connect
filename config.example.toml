@@ -136,6 +136,15 @@ udp_port_max = 10100          # WebRTC UDP port range end
 # secret = "your-coturn-static-auth-secret"
 # credential_ttl = 86400
 
+# Patient panel in the chat (optional). Panel requests go to one method on your
+# clinic system, signed with the secret and naming the staff member by email,
+# so that system applies their own permissions. Leave url empty to turn it off.
+[clinic]
+# url = "https://clinic.example.com"
+# method = "my_app.api.whatomate_panel.call"
+# secret = ""          # at least 32 characters; the same value on both sides
+# timeout_secs = 20
+
 # Default admin credentials (only used during initial setup when no users exist)
 [default_admin]
 email = "admin@admin.com"

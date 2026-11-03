@@ -29,6 +29,23 @@ type Config struct {
 	Cookie       CookieConfig       `koanf:"cookie"`
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
+	Clinic       ClinicConfig       `koanf:"clinic"`
+}
+
+// ClinicConfig links the chat's patient panel to a clinic system. Every panel
+// request goes to one method on that system, signed with Secret and naming the
+// staff member who is acting, so the clinic system applies their permissions.
+// Leave URL empty to turn the panel off.
+type ClinicConfig struct {
+	URL         string `koanf:"url"`    // e.g. https://clinic.example.com
+	Method      string `koanf:"method"` // e.g. my_app.api.whatomate_panel.call
+	Secret      string `koanf:"secret"` // shared with the clinic system, at least 32 characters
+	TimeoutSecs int    `koanf:"timeout_secs"`
+}
+
+// Enabled reports whether the panel is set up.
+func (c ClinicConfig) Enabled() bool {
+	return c.URL != "" && c.Method != "" && len(c.Secret) >= 32
 }
 
 type TTSConfig struct {

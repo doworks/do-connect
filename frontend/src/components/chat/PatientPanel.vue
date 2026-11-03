@@ -202,8 +202,8 @@ async function linkPatient(name: string) {
   emit('update:view', 'overview')
 }
 
-const frappeUrl = computed(() => patient.value
-  ? clinicService.frappeLink('Patient', patient.value.name)
+const frappeUrl = computed(() => patient.value && clinic.context?.frappe_url
+  ? clinicService.frappeLink(clinic.context.frappe_url, 'Patient', patient.value.name)
   : '')
 </script>
 

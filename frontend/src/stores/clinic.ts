@@ -41,6 +41,7 @@ export interface ClinicPatient {
 
 export interface ClinicContext {
   phone: string
+  frappe_url?: string
   patients: ClinicPatient[]
   can_create: boolean
   can_link: boolean

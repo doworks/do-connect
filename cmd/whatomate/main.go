@@ -636,6 +636,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/accounts/{id}/register", app.RegisterPhoneNumber) // Embedded signup manual/2fa registration
 	g.POST("/api/accounts/{id}/test", app.TestAccountConnection)
 	g.POST("/api/accounts/{id}/subscribe", app.SubscribeApp)
+	g.GET("/api/clinic/{action}", app.ClinicProxy)
+	g.POST("/api/clinic/{action}", app.ClinicProxy)
 	g.GET("/api/accounts/refused-events/summary", app.RefusedWebhookSummary)
 	g.GET("/api/accounts/{id}/refused-events", app.ListRefusedWebhooks)
 	g.POST("/api/accounts/{id}/refused-events/{event_id}/accept", app.AcceptRefusedWebhook)

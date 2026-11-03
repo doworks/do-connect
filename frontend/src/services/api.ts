@@ -307,8 +307,8 @@ export const clinicService = {
   findPatients: (query: string) => api.get('/clinic/find-patients', { params: { query } }),
   createPatient: (data: any) => api.post('/clinic/patients', data),
   linkNumber: (patient: string, phone: string) => api.post('/clinic/link-number', { patient, phone }),
-  frappeLink: (doctype: string, name: string) =>
-    `${(window as any).__FRAPPE_URL__ || ''}/app/${doctype.toLowerCase().replace(/ /g, '-')}/${encodeURIComponent(name)}`,
+  frappeLink: (base: string, doctype: string, name: string) =>
+    `${base.replace(/\/$/, '')}/app/${doctype.toLowerCase().replace(/ /g, '-')}/${encodeURIComponent(name)}`,
 }
 
 export const messagesService = {
