@@ -93,9 +93,9 @@ func (a *App) ClinicProxy(r *fastglue.Request) error {
 
 	args := map[string]any{}
 	if r.RequestCtx.IsGet() {
-		r.RequestCtx.QueryArgs().VisitAll(func(key, value []byte) {
+		for key, value := range r.RequestCtx.QueryArgs().All() {
 			args[string(key)] = string(value)
-		})
+		}
 	} else if body := r.RequestCtx.PostBody(); len(bytes.TrimSpace(body)) > 0 {
 		if err := json.Unmarshal(body, &args); err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
@@ -141,7 +141,7 @@ func (a *App) callClinic(cfg config.ClinicConfig, req clinicRequest) (int, json.
 		a.Log.Warn("Clinic system unreachable", "action", req.Action, "error", err)
 		return fasthttp.StatusBadGateway, nil, "The clinic system didn't answer. Try again in a moment."
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, clinicMaxResponseBytes))
 	if err != nil {
 		return fasthttp.StatusBadGateway, nil, "The clinic system's answer was cut off"
