@@ -90,6 +90,8 @@ func runMigrations(db *gorm.DB) error {
 		&models.APIKey{},
 		&models.SSOProvider{},
 		&models.Webhook{},
+		&models.WebhookDelivery{},
+		&models.IncomingWebhook{},
 		&models.CustomAction{},
 		&models.UserAvailabilityLog{},
 		// WhatsApp models

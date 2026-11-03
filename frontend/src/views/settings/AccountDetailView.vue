@@ -422,6 +422,7 @@ onMounted(async () => {
               <span v-if="!isNew" class="text-muted-foreground text-[10px]">{{ $t('accounts.accessTokenKeepExisting', '(leave empty to keep existing)') }}</span>
             </Label>
             <Input v-model="form.app_secret" type="password" :disabled="!canWrite" />
+            <p v-if="!isNew && !account?.has_app_secret" class="text-xs text-amber-500">{{ $t('accounts.appSecretMissing') }}</p>
             <Badge v-if="account?.has_app_secret" variant="outline" class="border-green-600 text-green-600">
               <Check class="h-3 w-3 mr-1" /> {{ $t('accounts.configured', 'Configured') }}
             </Badge>

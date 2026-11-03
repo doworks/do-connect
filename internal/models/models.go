@@ -270,6 +270,49 @@ func (Webhook) TableName() string {
 	return "webhooks"
 }
 
+// WebhookDeliveryStatus is where one delivery attempt stands.
+type WebhookDeliveryStatus string
+
+const (
+	WebhookDeliveryPending   WebhookDeliveryStatus = "pending"
+	WebhookDeliveryDelivered WebhookDeliveryStatus = "delivered"
+	WebhookDeliveryFailed    WebhookDeliveryStatus = "failed"
+)
+
+// WebhookDelivery is one event on its way to an outbound webhook.
+type WebhookDelivery struct {
+	BaseModel
+	OrganizationID uuid.UUID             `gorm:"type:uuid;index;not null" json:"organization_id"`
+	WebhookID      uuid.UUID             `gorm:"type:uuid;index;not null" json:"webhook_id"`
+	Event          string                `gorm:"size:50;not null" json:"event"`
+	Payload        string                `gorm:"type:text;not null" json:"-"`
+	Status         WebhookDeliveryStatus `gorm:"size:20;not null;index" json:"status"`
+	Attempts       int                   `gorm:"default:0" json:"attempts"`
+	LastError      string                `gorm:"type:text" json:"last_error"`
+	LastStatusCode int                   `gorm:"default:0" json:"last_status_code"`
+	NextAttemptAt  *time.Time            `gorm:"index" json:"next_attempt_at,omitempty"`
+	DeliveredAt    *time.Time            `json:"delivered_at,omitempty"`
+}
+
+func (WebhookDelivery) TableName() string {
+	return "webhook_deliveries"
+}
+
+// IncomingWebhook is a patient's message saved before Meta is told it arrived.
+type IncomingWebhook struct {
+	BaseModel
+	PhoneNumberID     string     `gorm:"size:100;not null" json:"phone_number_id"`
+	WhatsAppMessageID string     `gorm:"size:255;index" json:"whatsapp_message_id"`
+	ProfileName       string     `gorm:"size:255" json:"profile_name"`
+	Body              string     `gorm:"type:text;not null" json:"-"`
+	Attempts          int        `gorm:"default:0" json:"attempts"`
+	ProcessedAt       *time.Time `gorm:"index" json:"processed_at,omitempty"`
+}
+
+func (IncomingWebhook) TableName() string {
+	return "incoming_webhooks"
+}
+
 // CustomAction represents a custom action button for chat integrations
 type CustomAction struct {
 	BaseModel

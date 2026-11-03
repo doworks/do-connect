@@ -289,6 +289,8 @@ export const clinicService = {
 }
 
 export const messagesService = {
+  retryMedia: (contactId: string, messageId: string) =>
+    api.post(`/contacts/${contactId}/messages/${messageId}/download-media`),
   cancelHeld: (contactId: string, messageId: string) =>
     api.delete(`/contacts/${contactId}/messages/${messageId}/held`),
   list: (contactId: string, params?: { page?: number; limit?: number; before_id?: string; account?: string }) =>
@@ -893,7 +895,23 @@ export const auditLogsService = {
     api.get<{ audit_logs: AuditLogEntry[]; total: number }>('/audit-logs', { params }),
 }
 
+export interface WebhookDelivery {
+  id: string
+  event: string
+  status: 'pending' | 'delivered' | 'failed'
+  attempts: number
+  last_error?: string
+  last_status_code?: number
+  next_attempt_at?: string
+  delivered_at?: string
+  created_at: string
+}
+
 export const webhooksService = {
+  deliveries: (id: string, params?: { status?: string; page?: number; limit?: number }) =>
+    api.get(`/webhooks/${id}/deliveries`, { params }),
+  resendDelivery: (id: string, deliveryId: string) =>
+    api.post(`/webhooks/${id}/deliveries/${deliveryId}/resend`),
   list: (params?: { search?: string; page?: number; limit?: number }) =>
     api.get<{ webhooks: Webhook[]; available_events: WebhookEvent[]; total?: number }>('/webhooks', { params }),
   get: (id: string) => api.get<Webhook>(`/webhooks/${id}`),

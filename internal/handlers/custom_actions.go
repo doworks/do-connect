@@ -608,9 +608,12 @@ func replaceVariables(template string, context map[string]any) string {
 		var value any = context
 
 		for _, part := range parts {
-			if m, ok := value.(map[string]any); ok {
+			switch m := value.(type) {
+			case map[string]any:
 				value = m[part]
-			} else {
+			case models.JSONB:
+				value = m[part]
+			default:
 				return match // Return original if path not found
 			}
 		}

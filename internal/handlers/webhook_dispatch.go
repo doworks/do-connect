@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -35,6 +36,7 @@ type MessageEventData struct {
 	MediaFilename    string             `json:"media_filename,omitempty"`
 	ReplyToMessageID string             `json:"reply_to_message_id,omitempty"`
 	WhatsAppAccount  string             `json:"whatsapp_account"`
+	WhatsAppMsgID    string             `json:"whatsapp_message_id,omitempty"`
 	Direction        models.Direction   `json:"direction,omitempty"`
 	SentByUserID     string             `json:"sent_by_user_id,omitempty"`
 }
@@ -134,49 +136,30 @@ func (a *App) sendWebhook(ctx context.Context, webhook models.Webhook, eventType
 		return
 	}
 
-	// Retry logic with exponential backoff
-	maxRetries := 3
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		// Check if context was cancelled before retry
-		if ctx.Err() != nil {
-			a.Log.Warn("webhook delivery cancelled", "reason", ctx.Err(), "webhook_id", webhook.ID)
-			return
-		}
-
-		if attempt > 0 {
-			// Exponential backoff: 1s, 2s, 4s
-			select {
-			case <-ctx.Done():
-				a.Log.Warn("webhook delivery cancelled during backoff", "reason", ctx.Err(), "webhook_id", webhook.ID)
-				return
-			case <-time.After(time.Duration(1<<attempt) * time.Second):
-			}
-		}
-
-		if err := a.sendWebhookRequest(ctx, webhook, jsonData); err != nil {
-			a.Log.Warn("webhook delivery failed",
-				"error", err,
-				"webhook_id", webhook.ID,
-				"attempt", attempt+1,
-				"max_retries", maxRetries,
-			)
-			continue
-		}
-
-		// Success
-		a.Log.Debug("webhook delivered",
-			"webhook_id", webhook.ID,
-			"event", eventType,
-			"url", webhook.URL,
-		)
+	delivery, err := a.newDelivery(webhook, eventType, jsonData)
+	if err != nil {
+		a.Log.Error("failed to save webhook delivery", "error", err, "webhook_id", webhook.ID)
 		return
 	}
+	for try := 0; try < quickDeliveryTries; try++ {
+		if try > 0 {
+			select {
+			case <-ctx.Done():
+				return // Saved, so the retry loop picks it up.
+			case <-time.After(time.Duration(1<<try) * a.quickRetryDelay()):
+			}
+		}
+		if a.attemptDelivery(ctx, delivery) == nil {
+			return
+		}
+	}
+}
 
-	a.Log.Error("webhook delivery failed after all retries",
-		"webhook_id", webhook.ID,
-		"event", eventType,
-		"url", webhook.URL,
-	)
+func (a *App) quickRetryDelay() time.Duration {
+	if a.webhookQuickRetryDelay > 0 {
+		return a.webhookQuickRetryDelay
+	}
+	return time.Second
 }
 
 func (a *App) sendWebhookRequest(ctx context.Context, webhook models.Webhook, jsonData []byte) error {
@@ -231,5 +214,5 @@ type WebhookError struct {
 }
 
 func (e *WebhookError) Error() string {
-	return "webhook returned non-2xx status: " + http.StatusText(e.StatusCode)
+	return fmt.Sprintf("the server answered %d %s", e.StatusCode, http.StatusText(e.StatusCode))
 }

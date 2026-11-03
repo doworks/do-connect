@@ -266,3 +266,66 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 
 	return nil
 }
+
+// downloadMessageMedia fetches a file that failed to download when it arrived.
+func (a *App) downloadMessageMedia(ctx context.Context, message *models.Message) error {
+	mediaID, _ := message.Metadata["media_id"].(string)
+	if mediaID == "" {
+		return fmt.Errorf("this message has no file to download")
+	}
+	account, err := a.resolveWhatsAppAccount(message.OrganizationID, message.WhatsAppAccount)
+	if err != nil {
+		return err
+	}
+	localPath, err := a.DownloadAndSaveMedia(ctx, mediaID, message.MediaMimeType, a.toWhatsAppAccount(account))
+
+	metadata := models.JSONB{}
+	for key, value := range message.Metadata {
+		metadata[key] = value
+	}
+	if err != nil {
+		attempts, _ := metadata["media_attempts"].(float64)
+		metadata["media_attempts"] = attempts + 1
+		a.DB.Model(&models.Message{}).Where("id = ?", message.ID).Update("metadata", metadata)
+		message.Metadata = metadata
+		a.Log.Warn("Retry of media download failed", "error", err, "message_id", message.ID)
+		return err
+	}
+	delete(metadata, "media_id")
+	delete(metadata, "media_attempts")
+	a.DB.Model(&models.Message{}).Where("id = ?", message.ID).Updates(map[string]any{"media_url": localPath, "metadata": metadata})
+	message.MediaURL = localPath
+	message.Metadata = metadata
+	return nil
+}
+
+// RetryMessageMedia is the Download again button on a photo that didn't arrive.
+func (a *App) RetryMessageMedia(r *fastglue.Request) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	contactID, err := parsePathUUID(r, "id", "contact")
+	if err != nil {
+		return nil
+	}
+	messageID, err := parsePathUUID(r, "message_id", "message")
+	if err != nil {
+		return nil
+	}
+
+	var contact models.Contact
+	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
+	query = a.scopeAssignedContact(query, userID, orgID)
+	if err := query.First(&contact).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+	var message models.Message
+	if err := a.DB.Where("id = ? AND contact_id = ?", messageID, contactID).First(&message).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Message not found", nil, "")
+	}
+	if err := a.downloadMessageMedia(r.RequestCtx, &message); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "Could not download the file: "+err.Error(), nil, "")
+	}
+	return r.SendEnvelope(map[string]any{"media_url": messageMediaURL(&message)})
+}

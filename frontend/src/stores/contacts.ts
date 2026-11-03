@@ -56,6 +56,7 @@ export interface Message {
   id: string
   contact_id: string
   direction: 'incoming' | 'outgoing'
+  media_missing?: boolean
   sent_by_user_id?: string
   sent_by_name?: string
   sent_by_label?: string

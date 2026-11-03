@@ -940,6 +940,22 @@ async function sendMessage() {
 }
 
 const retryingMessageId = ref<string | null>(null)
+const retryingMediaId = ref<string | null>(null)
+
+async function retryMedia(message: Message) {
+  retryingMediaId.value = message.id
+  try {
+    const response = await messagesService.retryMedia(message.contact_id, message.id)
+    const index = contactsStore.messages.findIndex(m => m.id === message.id)
+    if (index !== -1) {
+      contactsStore.messages[index] = { ...contactsStore.messages[index], media_url: response.data.data.media_url, media_missing: false }
+    }
+  } catch (error) {
+    toast.error(getErrorMessage(error, t('chat.downloadFailed')))
+  } finally {
+    retryingMediaId.value = null
+  }
+}
 
 async function retryMessage(message: Message) {
   if (!contactsStore.currentContact || retryingMessageId.value) return
@@ -2691,6 +2707,16 @@ async function sendMediaMessage() {
                 </div>
                 <!-- Text content (for text messages or captions) -->
                 <span v-else-if="getMessageContent(message)" class="block whitespace-pre-wrap break-words" dir="auto">{{ getMessageContent(message) }}<span class="chat-bubble-time"><button v-if="senderName(message)" type="button" :class="['chat-bubble-sender', isAutomatedSender(message) ? '' : senderColor(senderName(message))]" @click="infoMessage = message"><Bot v-if="isAutomatedSender(message)" class="h-3 w-3" />{{ senderName(message) }}</button><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing' && message.status !== 'held'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
+                <!-- A file that failed to download -->
+                <button
+                  v-if="message.media_missing && !message.media_url"
+                  type="button"
+                  class="block mb-1 text-xs font-medium underline text-amber-300 light:text-amber-700 disabled:opacity-50"
+                  :disabled="retryingMediaId === message.id"
+                  @click="retryMedia(message)"
+                >
+                  {{ $t('chat.downloadAgain') }}
+                </button>
                 <!-- Fallback for media without URL -->
                 <span v-else-if="isMediaMessage(message) && !message.media_url" class="text-muted-foreground italic">[{{ message.message_type.charAt(0).toUpperCase() + message.message_type.slice(1) }}]<span class="chat-bubble-time"><button v-if="senderName(message)" type="button" :class="['chat-bubble-sender', isAutomatedSender(message) ? '' : senderColor(senderName(message))]" @click="infoMessage = message"><Bot v-if="isAutomatedSender(message)" class="h-3 w-3" />{{ senderName(message) }}</button><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
                 <!-- Interactive buttons - WhatsApp style -->

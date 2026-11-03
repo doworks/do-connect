@@ -71,6 +71,7 @@ type MessageResponse struct {
 	ReplyToMessageID *string              `json:"reply_to_message_id,omitempty"`
 	ReplyToMessage   *ReplyPreview        `json:"reply_to_message,omitempty"`
 	Reactions        []ReactionInfo       `json:"reactions,omitempty"`
+	MediaMissing     bool                 `json:"media_missing,omitempty"` // The file failed to download and can be tried again
 	SentByUserID     *uuid.UUID           `json:"sent_by_user_id,omitempty"`
 	SentByName       string               `json:"sent_by_name,omitempty"`
 	SentByLabel      string               `json:"sent_by_label,omitempty"`
@@ -537,6 +538,9 @@ func (a *App) buildMessagesResponse(messages []models.Message) []MessageResponse
 			UpdatedAt:       m.UpdatedAt,
 		}
 		applySenderFields(&msgResp, &m)
+		if mediaID, _ := m.Metadata["media_id"].(string); mediaID != "" {
+			msgResp.MediaMissing = true
+		}
 
 		if m.IsReply && m.ReplyToMessageID != nil {
 			replyToID := m.ReplyToMessageID.String()
@@ -686,6 +690,7 @@ type SendMessageRequest struct {
 	} `json:"content"`
 	ReplyToMessageID string `json:"reply_to_message_id,omitempty"`
 	WhatsAppAccount  string `json:"whatsapp_account,omitempty"`
+	SentBy           string `json:"sent_by,omitempty"` // API keys only: who to show as the sender
 
 	// Interactive message fields (for type="interactive")
 	Interactive *InteractiveContent `json:"interactive,omitempty"`
@@ -850,7 +855,7 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 	}
 
 	opts := DefaultSendOptions()
-	a.setSender(r, &opts, userID, "")
+	a.setSender(r, &opts, userID, req.SentBy)
 
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)
@@ -1036,7 +1041,11 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 	}
 
 	opts := DefaultSendOptions()
-	a.setSender(r, &opts, userID, "")
+	sentBy := ""
+	if values := form.Value["sent_by"]; len(values) > 0 {
+		sentBy = values[0]
+	}
+	a.setSender(r, &opts, userID, sentBy)
 
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)

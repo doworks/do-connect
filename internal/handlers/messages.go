@@ -21,6 +21,7 @@ import (
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
+	"gorm.io/gorm/clause"
 )
 
 // ============================================================================
@@ -137,6 +138,9 @@ func (a *App) senderUser(userID uuid.UUID) *models.User {
 	}
 	return &user
 }
+
+// maxHeaderMediaBytes is WhatsApp's largest document size for a template header.
+const maxHeaderMediaBytes = 100 * 1024 * 1024
 
 // DefaultSendOptions returns options suitable for agent UI sends
 func DefaultSendOptions() MessageSendOptions {
@@ -277,6 +281,9 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 		msg.SentByUser = a.senderUser(*msg.SentByUserID)
 	}
 
+	// Before sending, so a send that fails straight away isn't then marked as fine.
+	a.noteOutgoingOnContact(req.Contact, msg, opts.ExistingMessage == nil)
+
 	// 3. Execute send (async or sync)
 	if opts.Async {
 		a.wg.Add(1)
@@ -291,6 +298,14 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	} else {
 		wamid, err := sendFn(ctx)
 		a.finalizeMessageSend(msg, req, opts, wamid, err)
+		// Nothing else is using the message yet, so the caller can see how it went.
+		if err != nil {
+			msg.Status = models.MessageStatusFailed
+			msg.ErrorMessage = err.Error()
+		} else {
+			msg.Status = models.MessageStatusSent
+			msg.WhatsAppMessageID = wamid
+		}
 	}
 
 	// 4. Immediate actions (before send completes for async)
@@ -305,7 +320,6 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	// Update contact's last message
 	preview := a.getMessagePreview(req)
 	a.updateContactLastMessage(req.Contact, preview)
-	a.noteOutgoingOnContact(req.Contact, msg, opts.ExistingMessage == nil)
 
 	return msg, nil
 }
@@ -483,6 +497,7 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 		})
 		a.Log.Error("Failed to send message", "error", err, "message_id", msg.ID, "type", msg.MessageType)
 		a.markContactSendFailed(msg)
+		a.dispatchStatusEvent(msg, models.MessageStatusFailed, 0, errMsg)
 
 		// Broadcast failure status via WebSocket so frontend updates immediately
 		if opts.BroadcastWebSocket && a.WSHub != nil {
@@ -721,6 +736,7 @@ type SendTemplateMessageRequest struct {
 	ContactID      string            `json:"contact_id"`
 	PhoneNumber    string            `json:"phone_number"`    // Alternative to contact_id - send to phone directly
 	TemplateName   string            `json:"template_name"`   // Template name
+	Language       string            `json:"language"`        // With template_name: which language, when several share the name
 	TemplateID     string            `json:"template_id"`     // Alternative: template UUID
 	TemplateParams map[string]string `json:"template_params"` // Named or positional params
 	ButtonParams   map[string]string `json:"button_params"`   // Button index -> dynamic URL param value
@@ -774,6 +790,9 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		}
 		if v := form.Value["template_id"]; len(v) > 0 {
 			req.TemplateID = v[0]
+		}
+		if v := form.Value["language"]; len(v) > 0 {
+			req.Language = v[0]
 		}
 		if v := form.Value["account_name"]; len(v) > 0 {
 			req.AccountName = v[0]
@@ -850,7 +869,16 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		}
 		template = *t
 	} else {
-		if err := a.DB.Where("name = ? AND organization_id = ?", req.TemplateName, orgID).First(&template).Error; err != nil {
+		// Meta allows one name in several languages and on several numbers, so an
+		// approved template on the right number wins over whichever came first.
+		lookup := a.DB.Where("name = ? AND organization_id = ?", req.TemplateName, orgID)
+		if req.Language != "" {
+			lookup = lookup.Where("language = ?", req.Language)
+		}
+		if req.AccountName != "" {
+			lookup = lookup.Order(clause.Expr{SQL: "CASE WHEN whats_app_account = ? THEN 0 ELSE 1 END", Vars: []any{req.AccountName}})
+		}
+		if err := lookup.Order("CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END, updated_at DESC").First(&template).Error; err != nil {
 			return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Template not found", nil, "")
 		}
 	}
@@ -960,18 +988,22 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 			headerMediaID = req.HeaderMediaID
 		} else if req.HeaderMediaURL != "" {
 			// Option 2: Download from URL, then upload to WhatsApp
-			resp, err := http.Get(req.HeaderMediaURL)
+			fetchClient := &http.Client{Timeout: 30 * time.Second}
+			resp, err := fetchClient.Get(req.HeaderMediaURL)
 			if err != nil {
-				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to download header media from URL", nil, "")
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to download header media from URL: "+err.Error(), nil, "")
 			}
 			defer resp.Body.Close() //nolint:errcheck
 			if resp.StatusCode != http.StatusOK {
 				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, fmt.Sprintf("Header media URL returned status %d", resp.StatusCode), nil, "")
 			}
-			headerMediaData, err = io.ReadAll(resp.Body)
+			headerMediaData, err = io.ReadAll(io.LimitReader(resp.Body, maxHeaderMediaBytes+1))
 			if err != nil {
 				a.Log.Error("Failed to read header media from URL", "error", err)
 				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read header media from URL", nil, "")
+			}
+			if len(headerMediaData) > maxHeaderMediaBytes {
+				return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Header media is larger than WhatsApp allows", nil, "")
 			}
 			headerMimeType = resp.Header.Get("Content-Type")
 			if headerMimeType == "" {
@@ -981,6 +1013,8 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 			// Option 3: Multipart file upload
 			headerMediaData = headerFileData
 			headerMimeType = headerFileMimeType
+		} else {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, fmt.Sprintf("This template needs a %s header, but none was given", strings.ToLower(template.HeaderType)), nil, "")
 		}
 
 		// Upload to WhatsApp if we have raw data (options 2 & 3)
@@ -989,7 +1023,7 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 			mediaID, err := a.WhatsApp.UploadMedia(context.Background(), waAcct, headerMediaData, headerMimeType, "header")
 			if err != nil {
 				a.Log.Error("Failed to upload template header media", "error", err)
-				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to upload header media to WhatsApp", nil, "")
+				return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "WhatsApp refused the header media: "+err.Error(), nil, "")
 			}
 			headerMediaID = mediaID
 		}
@@ -1065,12 +1099,21 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 
 	opts := DefaultSendOptions()
 	a.setSender(r, &opts, userID, req.SentBy)
+	// An integration waits for the answer, so a refusal from Meta reaches it now
+	// instead of looking sent.
+	viaKey, _ := r.RequestCtx.UserValue(middleware.ContextKeyViaAPIKey).(bool)
+	if viaKey {
+		opts.Async = false
+	}
 
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)
 	if err != nil {
 		a.Log.Error("Failed to send template message", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to send template message", nil, "")
+	}
+	if viaKey && message.Status == models.MessageStatusFailed {
+		return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "WhatsApp refused this message: "+message.ErrorMessage, nil, "")
 	}
 
 	// Build full message response (same shape as SendMessage)
@@ -1086,6 +1129,7 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		MediaFilename:   message.MediaFilename,
 		Status:          message.Status,
 		IsReply:         message.IsReply,
+		WAMID:           message.WhatsAppMessageID,
 		WhatsAppAccount: message.WhatsAppAccount,
 		CreatedAt:       message.CreatedAt,
 		UpdatedAt:       message.UpdatedAt,

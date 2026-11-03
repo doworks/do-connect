@@ -170,26 +170,25 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid payload", nil, "")
 	}
 
-	// Verify webhook signature before processing any fields.
-	// Find a phoneNumberID from any change to look up the account's AppSecret.
-	if len(signature) > 0 {
-		for _, entry := range payload.Entry {
-			for _, change := range entry.Changes {
-				phoneNumberID := change.Value.Metadata.PhoneNumberID
-				if phoneNumberID == "" {
-					continue
-				}
-				account, err := a.getWhatsAppAccountCached(phoneNumberID)
-				if err != nil || account.AppSecret == "" {
-					continue
-				}
-				if !verifyWebhookSignature(body, signature, []byte(account.AppSecret)) {
-					a.Log.Warn("Invalid webhook signature", "phone_id", phoneNumberID)
-					return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Invalid signature", nil, "")
-				}
-				a.Log.Debug("Webhook signature verified successfully")
-				break
+	// Verify webhook signature before processing any fields. A number with an App
+	// Secret only accepts signed events, so nobody can post fake patient messages.
+	// A number without one can't be verified, which the account page warns about.
+	for _, entry := range payload.Entry {
+		for _, change := range entry.Changes {
+			phoneNumberID := change.Value.Metadata.PhoneNumberID
+			if phoneNumberID == "" {
+				continue
 			}
+			account, err := a.getWhatsAppAccountCached(phoneNumberID)
+			if err != nil || account.AppSecret == "" {
+				continue
+			}
+			if !verifyWebhookSignature(body, signature, []byte(account.AppSecret)) {
+				a.Log.Warn("Invalid or missing webhook signature", "phone_id", phoneNumberID)
+				return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Invalid signature", nil, "")
+			}
+			a.Log.Debug("Webhook signature verified successfully")
+			break
 		}
 	}
 
@@ -325,8 +324,15 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 					continue
 				}
 
+				// Saved before Meta gets its 200, or Meta sends it again later if this fails.
+				row, err := a.queueIncomingMessage(phoneNumberID, msg, profileName)
+				if err != nil {
+					a.Log.Error("Failed to save incoming message", "error", err, "message_id", msg.ID)
+					return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Could not save the message", nil, "")
+				}
+
 				// Process message asynchronously
-				go a.processIncomingMessage(phoneNumberID, msg, profileName)
+				go a.processQueuedMessage(row, msg)
 			}
 
 			// Process status updates
@@ -353,6 +359,10 @@ func (a *App) processIncomingMessage(phoneNumberID string, msg IncomingTextMessa
 	}()
 
 	// Check for duplicate message - Meta sometimes sends the same message multiple times
+	if !a.claimIncomingMessage(msg.ID) {
+		a.Log.Debug("Same message is already being processed, skipping", "message_id", msg.ID)
+		return
+	}
 	if msg.ID != "" {
 		var existingMsg models.Message
 		if err := a.DB.Where("whats_app_message_id = ?", msg.ID).First(&existingMsg).Error; err == nil {
@@ -465,6 +475,14 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 
 	if newStatus == models.MessageStatusFailed && message.Direction == models.DirectionOutgoing {
 		a.markContactSendFailed(&message)
+	}
+	if newStatus == models.MessageStatusDelivered || newStatus == models.MessageStatusRead || newStatus == models.MessageStatusFailed {
+		errorCode := 0
+		errorText, _ := updates["error_message"].(string)
+		if len(errors) > 0 {
+			errorCode = errors[0].Code
+		}
+		a.dispatchStatusEvent(&message, newStatus, errorCode, errorText)
 	}
 
 	// Update campaign stats and recipient status if this is a campaign message

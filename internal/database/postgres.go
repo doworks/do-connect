@@ -66,6 +66,8 @@ func GetMigrationModels() []MigrationModel {
 		{"APIKey", &models.APIKey{}},
 		{"SSOProvider", &models.SSOProvider{}},
 		{"Webhook", &models.Webhook{}},
+		{"WebhookDelivery", &models.WebhookDelivery{}},
+		{"IncomingWebhook", &models.IncomingWebhook{}},
 		{"CustomAction", &models.CustomAction{}},
 		{"WhatsAppAccount", &models.WhatsAppAccount{}},
 		{"Contact", &models.Contact{}},

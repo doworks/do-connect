@@ -147,11 +147,13 @@ func (a *App) releaseHeldMessages(account *models.WhatsAppAccount, contact *mode
 		a.broadcastReadState(account.OrganizationID, contact.ID)
 	}
 
+	// Sending updates the contact it's given, and the caller is still using this one.
+	own := *contact
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
 		for i := range held {
-			a.releaseHeldMessage(account, contact, &held[i])
+			a.releaseHeldMessage(account, &own, &held[i])
 		}
 	}()
 }

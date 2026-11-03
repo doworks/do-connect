@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -44,6 +45,9 @@ type App struct {
 	S3Client *storage.S3Client
 	// wg tracks background goroutines for graceful shutdown
 	wg sync.WaitGroup
+
+	// webhookQuickRetryDelay shortens the wait between quick retries in tests.
+	webhookQuickRetryDelay time.Duration
 }
 
 // WaitForBackgroundTasks blocks until all background goroutines complete.

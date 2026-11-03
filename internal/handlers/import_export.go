@@ -129,11 +129,8 @@ var importConfigs = map[string]ImportConfig{
 		UniqueColumn:    "phone_number",
 		ColumnTransform: map[string]func(string) (any, error){
 			"phone_number": func(s string) (any, error) {
-				// Normalize phone number - remove + prefix
-				phone := strings.TrimSpace(s)
-				if len(phone) > 0 && phone[0] == '+' {
-					phone = phone[1:]
-				}
+				// Same form as everywhere else, without a country code to add here.
+				phone := utils.NormalizePhone(s, "")
 				if phone == "" {
 					return nil, fmt.Errorf("phone number is required")
 				}

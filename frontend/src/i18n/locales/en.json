@@ -444,6 +444,8 @@
     "serviceWindowExpired": "The 24-hour messaging window has expired. Only template messages can be sent until the customer replies.",
     "sendTemplateAction": "Send Template",
     "notDelivered": "Not delivered",
+    "downloadAgain": "This file didn't arrive. Download again",
+    "downloadFailed": "Could not download the file",
     "insert": "Insert",
     "colleagueTyping": "{name} is replying to this patient",
     "newBelow": "New message below ({count})",
@@ -1164,7 +1166,17 @@
     "confirmDisableDescription": "This webhook will stop receiving events. You can re-enable it at any time.",
     "fetchErrorTitle": "Failed to load webhooks",
     "fetchErrorDescription": "Something went wrong while loading your webhooks. Please try again.",
-    "testWebhook": "Test webhook"
+    "testWebhook": "Test webhook",
+    "deliveries": "Deliveries",
+    "deliveriesHint": "What was sent to this webhook. Failed sends are retried by themselves for about 16 hours.",
+    "noDeliveries": "Nothing sent yet",
+    "deliveryDelivered": "Delivered",
+    "deliveryPending": "Will retry",
+    "deliveryFailed": "Failed",
+    "resend": "Resend",
+    "resent": "Delivered",
+    "attempts": "{count} attempts",
+    "nextAttempt": "Next try {time}"
   },
   "cannedResponses": {
     "title": "Canned Responses",
@@ -1445,7 +1457,8 @@
     "account": "Account",
     "appId": "App ID",
     "defaults": "Defaults",
-    "status": "Status"
+    "status": "Status",
+    "appSecretMissing": "No App Secret is set, so messages can't be checked as really coming from Meta. Anyone who finds the webhook address could post fake patient messages. Add it from your Meta app's settings."
   },
   "dashboard": {
     "title": "Dashboard",

@@ -3,7 +3,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { webhooksService, type Webhook, type WebhookEvent } from '@/services/api'
+import { webhooksService, type Webhook, type WebhookDelivery, type WebhookEvent } from '@/services/api'
 import { toast } from 'vue-sonner'
 import { getErrorMessage } from '@/lib/api-utils'
 import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
@@ -208,6 +208,40 @@ async function deleteWebhook() {
   deleteDialogOpen.value = false
 }
 
+const deliveries = ref<WebhookDelivery[]>([])
+const resendingId = ref('')
+
+function deliveryLabel(status: string) {
+  if (status === 'delivered') return t('webhooks.deliveryDelivered')
+  return status === 'failed' ? t('webhooks.deliveryFailed') : t('webhooks.deliveryPending')
+}
+
+async function loadDeliveries() {
+  if (!webhook.value?.id) return
+  try {
+    const response = await webhooksService.deliveries(webhook.value.id, { limit: 25 })
+    deliveries.value = response.data.data?.deliveries || []
+  } catch {
+    deliveries.value = []
+  }
+}
+
+async function resendDelivery(delivery: WebhookDelivery) {
+  if (!webhook.value?.id) return
+  resendingId.value = delivery.id
+  try {
+    await webhooksService.resendDelivery(webhook.value.id, delivery.id)
+    toast.success(t('webhooks.resent'))
+  } catch (error) {
+    toast.error(getErrorMessage(error, t('webhooks.deliveryFailed')))
+  } finally {
+    resendingId.value = ''
+    loadDeliveries()
+  }
+}
+
+watch(() => webhook.value?.id, loadDeliveries)
+
 onMounted(async () => {
   await fetchAvailableEvents()
   if (isNew.value) {
@@ -311,6 +345,41 @@ onMounted(async () => {
               @update:checked="form.is_active = $event"
               :disabled="!canWrite"
             />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card v-if="webhook && !isNew">
+        <CardHeader class="pb-3">
+          <CardTitle class="text-sm font-medium">{{ $t('webhooks.deliveries') }}</CardTitle>
+          <p class="text-xs text-muted-foreground">{{ $t('webhooks.deliveriesHint') }}</p>
+        </CardHeader>
+        <CardContent class="p-0">
+          <p v-if="!deliveries.length" class="px-6 pb-4 text-xs text-muted-foreground">{{ $t('webhooks.noDeliveries') }}</p>
+          <div v-for="delivery in deliveries" :key="delivery.id" class="flex items-center gap-2 px-6 py-2 border-t text-xs">
+            <span
+              :class="[
+                'shrink-0 h-5 px-1.5 rounded-full leading-5 font-medium',
+                delivery.status === 'delivered' ? 'bg-emerald-500/15 text-emerald-500'
+                  : delivery.status === 'failed' ? 'bg-red-500/15 text-red-500'
+                  : 'bg-amber-500/15 text-amber-500'
+              ]"
+            >{{ deliveryLabel(delivery.status) }}</span>
+            <span class="min-w-0 flex-1">
+              <span class="font-medium">{{ delivery.event }}</span>
+              <span class="text-muted-foreground"> · {{ new Date(delivery.created_at).toLocaleString() }}</span>
+              <span v-if="delivery.attempts > 1" class="text-muted-foreground"> · {{ $t('webhooks.attempts', { count: delivery.attempts }) }}</span>
+              <span v-if="delivery.status === 'pending' && delivery.next_attempt_at" class="text-muted-foreground"> · {{ $t('webhooks.nextAttempt', { time: new Date(delivery.next_attempt_at).toLocaleTimeString() }) }}</span>
+              <span v-if="delivery.last_error && delivery.status !== 'delivered'" class="block text-red-500 break-words">{{ delivery.last_error }}</span>
+            </span>
+            <Button
+              v-if="delivery.status !== 'delivered' && canWrite"
+              size="sm"
+              variant="outline"
+              class="h-6 px-2 text-[11px] shrink-0"
+              :disabled="resendingId === delivery.id"
+              @click="resendDelivery(delivery)"
+            >{{ $t('webhooks.resend') }}</Button>
           </div>
         </CardContent>
       </Card>

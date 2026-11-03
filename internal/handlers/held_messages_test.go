@@ -20,18 +20,36 @@ import (
 
 // sentToMeta records what would have gone to WhatsApp, in order.
 type sentToMeta struct {
-	mu   sync.Mutex
-	sent []map[string]any
+	mu      sync.Mutex
+	sent    []map[string]any
+	refusal string
+}
+
+// fail makes Meta refuse every send from now on.
+func (s *sentToMeta) fail(reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refusal = reason
 }
 
 func (s *sentToMeta) RoundTrip(req *http.Request) (*http.Response, error) {
-	body, _ := io.ReadAll(req.Body)
 	var parsed map[string]any
-	_ = json.Unmarshal(body, &parsed)
+	if req.Body != nil {
+		body, _ := io.ReadAll(req.Body)
+		_ = json.Unmarshal(body, &parsed)
+	}
 	s.mu.Lock()
-	s.sent = append(s.sent, parsed)
+	refusal := s.refusal
+	if refusal == "" {
+		s.sent = append(s.sent, parsed)
+	}
 	s.mu.Unlock()
 	recorder := httptest.NewRecorder()
+	if refusal != "" {
+		recorder.WriteHeader(http.StatusBadRequest)
+		_, _ = recorder.WriteString(`{"error":{"code":132001,"message":"` + refusal + `"}}`)
+		return recorder.Result(), nil
+	}
 	_, _ = recorder.WriteString(`{"messages":[{"id":"wamid.` + uuid.NewString() + `"}]}`)
 	return recorder.Result(), nil
 }
@@ -60,6 +78,7 @@ func newHeldFixture(t *testing.T) heldFixture {
 	t.Helper()
 	app := newProcessorTestApp(t)
 	app.Config = &config.Config{}
+	app.webhookQuickRetryDelay = time.Millisecond
 	meta := &sentToMeta{}
 	app.WhatsApp.HTTPClient = &http.Client{Transport: meta}
 	t.Cleanup(app.WaitForBackgroundTasks)
@@ -267,9 +286,11 @@ func TestReleasingHeldMessages(t *testing.T) {
 		var wg sync.WaitGroup
 		for range 4 {
 			wg.Add(1)
+			// Each incoming message loads its own contact, as the real path does.
+			own := *contact
 			go func() {
 				defer wg.Done()
-				f.app.saveIncomingMessage(f.account, contact, "wamid."+uuid.NewString(), "text", "Hi", nil, "")
+				f.app.saveIncomingMessage(f.account, &own, "wamid."+uuid.NewString(), "text", "Hi", nil, "")
 			}()
 		}
 		wg.Wait()

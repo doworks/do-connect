@@ -270,11 +270,13 @@ func (a *App) getWebhooksCached(orgID uuid.UUID) ([]models.Webhook, error) {
 	cacheKey := fmt.Sprintf("%s%s", webhooksCachePrefix, orgID.String())
 
 	// Try cache first
-	cached, err := a.Redis.Get(ctx, cacheKey).Result()
-	if err == nil && cached != "" {
-		var webhooks []models.Webhook
-		if err := json.Unmarshal([]byte(cached), &webhooks); err == nil {
-			return webhooks, nil
+	if a.Redis != nil {
+		cached, err := a.Redis.Get(ctx, cacheKey).Result()
+		if err == nil && cached != "" {
+			var webhooks []models.Webhook
+			if err := json.Unmarshal([]byte(cached), &webhooks); err == nil {
+				return webhooks, nil
+			}
 		}
 	}
 
@@ -285,7 +287,7 @@ func (a *App) getWebhooksCached(orgID uuid.UUID) ([]models.Webhook, error) {
 	}
 
 	// Cache the result
-	if data, err := json.Marshal(webhooks); err == nil {
+	if data, err := json.Marshal(webhooks); err == nil && a.Redis != nil {
 		a.Redis.Set(ctx, cacheKey, data, webhooksCacheTTL)
 	}
 

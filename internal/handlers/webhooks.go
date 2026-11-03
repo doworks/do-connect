@@ -110,6 +110,7 @@ type WebhookResponse struct {
 var AvailableWebhookEvents = []map[string]string{
 	{"value": string(models.WebhookEventMessageIncoming), "label": "Message Incoming", "description": "When a new message is received from a contact"},
 	{"value": string(models.WebhookEventMessageSent), "label": "Message Sent", "description": "When an agent sends a message"},
+	{"value": string(models.WebhookEventMessageStatus), "label": "Message Status", "description": "When an outgoing message is delivered, read or fails, with the reason"},
 	{"value": string(models.WebhookEventMessageOutgoing), "label": "Message Outgoing", "description": "When a message is sent to a contact (includes echoes)"},
 	{"value": string(models.WebhookEventContactCreated), "label": "Contact Created", "description": "When a new contact is created"},
 	{"value": string(models.WebhookEventTransferCreated), "label": "Transfer Created", "description": "When a transfer to human agent is requested"},
@@ -379,7 +380,7 @@ func (a *App) TestWebhook(r *fastglue.Request) error {
 
 	if err := a.sendWebhookRequest(ctx, *webhook, jsonData); err != nil {
 		a.Log.Error("Webhook test failed", "error", err, "webhook_id", webhook.ID)
-		return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "Webhook test failed", nil, "")
+		return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "Webhook test failed: "+err.Error(), nil, "")
 	}
 
 	return r.SendEnvelope(map[string]string{"message": "Test webhook sent successfully"})

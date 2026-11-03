@@ -576,6 +576,13 @@ func (a *App) DeleteUser(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Cannot delete yourself", nil, "")
 	}
 
+	// A key stops working with its owner, which would silently break whatever uses it.
+	var activeKeys int64
+	a.DB.Model(&models.APIKey{}).Where("user_id = ? AND organization_id = ? AND is_active = ?", id, orgID, true).Count(&activeKeys)
+	if activeKeys > 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "This user owns active API keys. Replace or revoke them first, or integrations using them will stop working.", nil, "")
+	}
+
 	// Find user via user_organizations (supports cross-org members).
 	// Select("users.*") avoids column conflict with user_organizations.organization_id.
 	var user models.User

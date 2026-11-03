@@ -1441,6 +1441,7 @@ func (a *App) extractMessageContent(ctx context.Context, msg IncomingTextMessage
 		}
 		// Download and save media locally
 		waAccount := a.toWhatsAppAccount(account)
+		extracted.Media.MediaID = msg.Image.ID
 		if localPath, err := a.DownloadAndSaveMedia(ctx, msg.Image.ID, msg.Image.MimeType, waAccount); err != nil {
 			a.Log.Error("Failed to download image", "error", err, "media_id", msg.Image.ID)
 		} else {
@@ -1455,6 +1456,7 @@ func (a *App) extractMessageContent(ctx context.Context, msg IncomingTextMessage
 		}
 		// Download and save media locally
 		waAccount := a.toWhatsAppAccount(account)
+		extracted.Media.MediaID = msg.Document.ID
 		if localPath, err := a.DownloadAndSaveMedia(ctx, msg.Document.ID, msg.Document.MimeType, waAccount); err != nil {
 			a.Log.Error("Failed to download document", "error", err, "media_id", msg.Document.ID)
 		} else {
@@ -1468,6 +1470,7 @@ func (a *App) extractMessageContent(ctx context.Context, msg IncomingTextMessage
 		}
 		// Download and save media locally
 		waAccount := a.toWhatsAppAccount(account)
+		extracted.Media.MediaID = msg.Video.ID
 		if localPath, err := a.DownloadAndSaveMedia(ctx, msg.Video.ID, msg.Video.MimeType, waAccount); err != nil {
 			a.Log.Error("Failed to download video", "error", err, "media_id", msg.Video.ID)
 		} else {
@@ -1480,6 +1483,7 @@ func (a *App) extractMessageContent(ctx context.Context, msg IncomingTextMessage
 		}
 		// Download and save media locally
 		waAccount := a.toWhatsAppAccount(account)
+		extracted.Media.MediaID = msg.Audio.ID
 		if localPath, err := a.DownloadAndSaveMedia(ctx, msg.Audio.ID, msg.Audio.MimeType, waAccount); err != nil {
 			a.Log.Error("Failed to download audio", "error", err, "media_id", msg.Audio.ID)
 		} else {
@@ -1492,6 +1496,7 @@ func (a *App) extractMessageContent(ctx context.Context, msg IncomingTextMessage
 		}
 		// Download and save media locally
 		waAccount := a.toWhatsAppAccount(account)
+		extracted.Media.MediaID = msg.Sticker.ID
 		if localPath, err := a.DownloadAndSaveMedia(ctx, msg.Sticker.ID, msg.Sticker.MimeType, waAccount); err != nil {
 			a.Log.Error("Failed to download sticker", "error", err, "media_id", msg.Sticker.ID)
 		} else {
@@ -1538,6 +1543,7 @@ func (a *App) extractMessageContent(ctx context.Context, msg IncomingTextMessage
 
 // MediaInfo holds media-related information for an incoming message
 type MediaInfo struct {
+	MediaID       string // Meta's ID, kept while the file hasn't been downloaded
 	MediaURL      string
 	MediaMimeType string
 	MediaFilename string
@@ -1575,6 +1581,10 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		message.MediaURL = mediaInfo.MediaURL
 		message.MediaMimeType = mediaInfo.MediaMimeType
 		message.MediaFilename = mediaInfo.MediaFilename
+		// Kept so the download can be tried again.
+		if mediaInfo.MediaURL == "" && mediaInfo.MediaID != "" {
+			message.Metadata = models.JSONB{"media_id": mediaInfo.MediaID}
+		}
 	}
 
 	if err := a.DB.Create(&message).Error; err != nil {
@@ -1636,6 +1646,7 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		MediaFilename:    message.MediaFilename,
 		ReplyToMessageID: replyToMessageIDString(&message),
 		WhatsAppAccount:  account.Name,
+		WhatsAppMsgID:    whatsappMsgID,
 		Direction:        models.DirectionIncoming,
 	})
 }

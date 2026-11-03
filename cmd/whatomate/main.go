@@ -282,6 +282,10 @@ func runServer(args []string) {
 	go slaProcessor.Start(slaCtx)
 	lo.Info("SLA processor started")
 
+	// Retries undelivered webhooks and unsaved incoming messages
+	maintenanceCtx, maintenanceCancel := context.WithCancel(context.Background())
+	go app.RunMaintenance(maintenanceCtx)
+
 	// Start embedded workers
 	var workers []*worker.Worker
 	var workerCancel context.CancelFunc
@@ -321,6 +325,8 @@ func runServer(args []string) {
 	app.StopCampaignStatsSubscriber()
 	lo.Info("Campaign stats subscriber stopped")
 
+	maintenanceCancel()
+
 	// Stop SLA processor
 	lo.Info("Stopping SLA processor...")
 	slaCancel()
@@ -343,6 +349,19 @@ func runServer(args []string) {
 		lo.Error("Server shutdown error", "error", err)
 	}
 	lo.Info("Server stopped")
+
+	// Let messages being sent finish, so they don't stay on pending.
+	finished := make(chan struct{})
+	go func() {
+		app.WaitForBackgroundTasks()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+		lo.Info("Background work finished")
+	case <-time.After(20 * time.Second):
+		lo.Warn("Background work still running at shutdown")
+	}
 }
 
 // ============================================================================
@@ -647,6 +666,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/contacts/{id}/messages", app.GetMessages)
 	g.POST("/api/contacts/{id}/messages", app.SendMessage)
 	g.DELETE("/api/contacts/{id}/messages/{message_id}/held", app.CancelHeldMessage)
+	g.POST("/api/contacts/{id}/messages/{message_id}/download-media", app.RetryMessageMedia)
 	g.POST("/api/contacts/{id}/mark-read", app.MarkContactRead)
 	g.POST("/api/contacts/{id}/mark-unread", app.MarkContactUnread)
 	g.POST("/api/contacts/{id}/messages/{message_id}/reaction", app.SendReaction)
@@ -811,6 +831,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/webhooks/{id}", app.UpdateWebhook)
 	g.DELETE("/api/webhooks/{id}", app.DeleteWebhook)
 	g.POST("/api/webhooks/{id}/test", app.TestWebhook)
+	g.GET("/api/webhooks/{id}/deliveries", app.ListWebhookDeliveries)
+	g.POST("/api/webhooks/{id}/deliveries/{delivery_id}/resend", app.ResendWebhookDelivery)
 
 	// Custom Actions
 	g.GET("/api/custom-actions", app.ListCustomActions)
