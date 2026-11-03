@@ -1,17 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { contactsService, messagesService } from '@/services/api'
+import { phoneDigits } from '@/lib/phone'
 
 // Phones are stored without leading + or whitespace (see CreateContact in
 // internal/handlers/contacts.go). Strip them from a digit-only query so a user
 // typing "+91 98765 43210" still matches a stored "919876543210" via the
 // server's substring LIKE.
 function normalizeContactSearch(raw: string): string {
-  const trimmed = raw.trim().replace(/^\+/, '')
-  if (trimmed && /^[\d\s+()-]+$/.test(trimmed)) {
-    return trimmed.replace(/[\s+()-]/g, '')
-  }
-  return trimmed
+  return phoneDigits(raw) || raw.trim().replace(/^\+/, '')
 }
 
 export interface Contact {
@@ -19,6 +16,7 @@ export interface Contact {
   phone_number: string
   name: string
   profile_name?: string
+  whatsapp_name?: string
   avatar_url?: string
   status: string
   tags: string[]
@@ -27,7 +25,14 @@ export interface Contact {
   last_inbound_at?: string
   service_window_open?: boolean
   unread_count: number
+  marked_unread?: boolean
+  last_message_preview?: string
+  last_message_direction?: 'incoming' | 'outgoing'
+  last_reply_by?: string
+  last_send_failed?: boolean
+  waiting_since?: string
   assigned_user_id?: string
+  assigned_user_name?: string
   whatsapp_account?: string
   marketing_opt_out?: boolean
   created_at: string
@@ -51,6 +56,12 @@ export interface Message {
   id: string
   contact_id: string
   direction: 'incoming' | 'outgoing'
+  sent_by_user_id?: string
+  sent_by_name?: string
+  sent_by_label?: string
+  template_name?: string
+  delivered_at?: string
+  read_at?: string
   message_type: string
   content: any
   media_url?: string
@@ -116,6 +127,21 @@ export const useContactsStore = defineStore('contacts', () => {
     })
   })
 
+  let latestMessagesRequest = ''
+
+  // Who else is typing in the open chat. Cleared if no more typing arrives.
+  const agentTyping = ref('')
+  let agentTypingTimer: ReturnType<typeof setTimeout> | null = null
+  function noteAgentTyping(payload: { contact_id: string; user_id: string; name: string }) {
+    if (payload.contact_id !== currentContact.value?.id) return
+    agentTyping.value = payload.name
+    if (agentTypingTimer) clearTimeout(agentTypingTimer)
+    agentTypingTimer = setTimeout(() => { agentTyping.value = '' }, 4000)
+  }
+
+  const listFilter = ref('all')
+  const filterCounts = ref<Record<string, number>>({})
+
   async function fetchContacts(params?: { search?: string; page?: number; limit?: number; tags?: string }) {
     isLoading.value = true
     try {
@@ -128,6 +154,7 @@ export const useContactsStore = defineStore('contacts', () => {
         limit: contactsLimit.value,
         tags: tagsParam,
         search,
+        filter: listFilter.value === 'all' ? undefined : listFilter.value,
         ...params
       })
       // API returns { status: "success", data: { contacts: [...], total: number } }
@@ -135,6 +162,7 @@ export const useContactsStore = defineStore('contacts', () => {
       contacts.value = data.contacts || []
       contactsTotal.value = data.total ?? contacts.value.length
       contactsPage.value = 1
+      filterCounts.value = data.filter_counts || {}
     } catch (error) {
       console.error('Failed to fetch contacts:', error)
     } finally {
@@ -189,19 +217,23 @@ export const useContactsStore = defineStore('contacts', () => {
 
   async function fetchMessages(contactId: string, params?: { page?: number; limit?: number; account?: string }) {
     isLoadingMessages.value = true
+    const requestedContact = contactId
+    latestMessagesRequest = requestedContact
     // Drop the previous contact's messages immediately so the list doesn't show
     // stale content under the new contact's header while the fetch is in flight.
     messages.value = []
     try {
       const response = await messagesService.list(contactId, params)
       // API returns { status: "success", data: { messages: [...], has_more: boolean } }
+      // A slow answer for a chat staff have already left must not land in this one.
+      if (latestMessagesRequest !== requestedContact) return
       const data = response.data.data || response.data
       messages.value = data.messages || []
       hasMoreMessages.value = data.has_more === true
     } catch (error) {
       console.error('Failed to fetch messages:', error)
     } finally {
-      isLoadingMessages.value = false
+      if (latestMessagesRequest === requestedContact) isLoadingMessages.value = false
     }
   }
 
@@ -249,7 +281,7 @@ export const useContactsStore = defineStore('contacts', () => {
       // API returns { status: "success", data: { ... } }
       const newMessage = response.data.data || response.data
       // Use addMessage which has duplicate checking (WebSocket may also broadcast this)
-      addMessage(newMessage)
+      if (currentContact.value?.id === contactId) addMessage(newMessage)
 
       return newMessage
     } catch (error) {
@@ -295,23 +327,56 @@ export const useContactsStore = defineStore('contacts', () => {
 
   // Reflect a new message on its sidebar row. Returns false when the contact
   // isn't in the loaded list (a new conversation, or beyond the loaded pages).
-  function updateContactFromMessage(message: Pick<Message, 'contact_id' | 'direction' | 'status' | 'created_at'>): boolean {
+  function updateContactFromMessage(message: Pick<Message, 'contact_id' | 'direction' | 'status' | 'created_at' | 'message_type' | 'content' | 'sent_by_name' | 'sent_by_label'>): boolean {
     const contact = contacts.value.find(c => c.id === message.contact_id)
     if (!contact) return false
     contact.last_message_at = message.created_at
+    contact.last_message_direction = message.direction
+    const body = message.content?.body
+    contact.last_message_preview = body && ['text', 'button_reply', 'template', 'interactive'].includes(message.message_type)
+      ? body.slice(0, 100)
+      : `[${message.message_type}]`
     if (message.direction === 'incoming') {
       // Mirrors the server's unread count, which excludes already-read
       // messages (e.g. ones the chatbot handled).
-      if (message.status !== 'read') contact.unread_count++
+      if (message.status !== 'read') {
+        contact.unread_count++
+        contact.waiting_since = contact.waiting_since || message.created_at
+      }
       contact.last_inbound_at = message.created_at
       contact.service_window_open = true
+    } else {
+      contact.last_send_failed = false
+      contact.last_reply_by = message.sent_by_label || message.sent_by_name || contact.last_reply_by
+      // Same rule as the server: only a staff reply ends the wait.
+      if (message.sent_by_name && message.status !== 'held') contact.waiting_since = undefined
     }
     return true
   }
 
   function markContactRead(contactId: string) {
     const contact = contacts.value.find(c => c.id === contactId)
-    if (contact) contact.unread_count = 0
+    if (contact) {
+      contact.unread_count = 0
+      contact.marked_unread = false
+    }
+  }
+
+  function markContactUnread(contactId: string) {
+    const contact = contacts.value.find(c => c.id === contactId)
+    if (contact) {
+      contact.unread_count = Math.max(contact.unread_count, 1)
+      contact.marked_unread = true
+    }
+  }
+
+  function removeMessage(messageId: string) {
+    messages.value = messages.value.filter(m => m.id !== messageId)
+  }
+
+  function setListFilter(filter: string) {
+    listFilter.value = filter
+    fetchContacts()
   }
 
   // Coalesce refetches triggered by live events, so a busy inbox doesn't turn
@@ -347,13 +412,34 @@ export const useContactsStore = defineStore('contacts', () => {
   }
 
   function updateMessageStatus(messageId: string, status: string, errorMessage?: string) {
+    // A held message someone cancelled.
+    if (status === 'cancelled') {
+      removeMessage(messageId)
+      return
+    }
     const index = messages.value.findIndex(m => m.id === messageId)
     if (index !== -1) {
-      messages.value[index] = {
+      const updated = {
         ...messages.value[index],
         status,
         ...(errorMessage ? { error_message: errorMessage } : {})
       }
+      // A held message going out moves to where the patient actually gets it.
+      if (messages.value[index].status === 'held' && status !== 'failed') {
+        messages.value.splice(index, 1)
+        const released = { ...updated, created_at: new Date().toISOString() }
+        messages.value.push(released)
+        const contact = contacts.value.find(c => c.id === released.contact_id)
+        if (contact) {
+          // Not a staff reply to what the patient just wrote, so any wait stays.
+          contact.last_message_at = released.created_at
+          contact.last_message_direction = 'outgoing'
+          contact.last_message_preview = released.content?.body?.slice(0, 100) || contact.last_message_preview
+          contact.last_reply_by = released.sent_by_name || contact.last_reply_by
+        }
+        return
+      }
+      messages.value[index] = updated
     }
   }
 
@@ -431,6 +517,13 @@ export const useContactsStore = defineStore('contacts', () => {
     fetchMessages,
     fetchOlderMessages,
     sendMessage,
+    listFilter,
+    filterCounts,
+    setListFilter,
+    markContactUnread,
+    removeMessage,
+    agentTyping,
+    noteAgentTyping,
     sendTemplate,
     addMessage,
     updateMessageStatus,

@@ -105,3 +105,21 @@ func TestGetOrCreateContact_UpdatesProfileName(t *testing.T) {
 	require.NoError(t, db.First(&reloaded, contact.ID).Error)
 	assert.Equal(t, "New Name", reloaded.ProfileName)
 }
+
+func TestGetOrCreateContact_KeepsLockedName(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	org := testutil.CreateTestOrganization(t, db)
+
+	contact, created, err := GetOrCreateContact(db, org.ID, "97333112233", "fatoom")
+	require.NoError(t, err)
+	require.True(t, created)
+	assert.Equal(t, "fatoom", contact.ProfileName)
+	assert.Equal(t, "fatoom", contact.WhatsAppName)
+
+	require.NoError(t, db.Model(contact).Updates(map[string]any{"profile_name": "Fatima Hassan", "name_locked": true}).Error)
+
+	again, _, err := GetOrCreateContact(db, org.ID, "97333112233", "fatoom 2")
+	require.NoError(t, err)
+	assert.Equal(t, "Fatima Hassan", again.ProfileName, "the name staff set stays")
+	assert.Equal(t, "fatoom 2", again.WhatsAppName, "the WhatsApp name is still recorded")
+}

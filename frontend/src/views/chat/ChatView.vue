@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
 import { useTransfersStore } from '@/stores/transfers'
 import { wsService } from '@/services/websocket'
-import { contactsService, chatbotService, messagesService, customActionsService, accountsService, cannedResponsesService, getRequestHeaders, type CustomAction, type ActionResult, type CannedResponse } from '@/services/api'
+import { contactsService, chatbotService, messagesService, customActionsService, accountsService, cannedResponsesService, organizationService, getRequestHeaders, type CustomAction, type ActionResult, type CannedResponse } from '@/services/api'
 import { useTagsStore } from '@/stores/tags'
 import { TagBadge } from '@/components/ui/tag-badge'
 import { getTagColorClass } from '@/lib/constants'
@@ -89,15 +89,26 @@ import {
   Code,
   RotateCw,
   Filter,
-  StickyNote
+  StickyNote,
+  CalendarClock,
+  Hourglass,
+  Bot,
+  MailWarning,
+  MailOpen,
+  MessageCirclePlus,
+  UserCheck
 } from 'lucide-vue-next'
 import { getInitials, getAvatarGradient } from '@/lib/utils'
+import { normalizePhone, formatPhone, phoneDigits } from '@/lib/phone'
 import { useColorMode } from '@/composables/useColorMode'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
 import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
 import PreviewButtonGroup from '@/components/chatbot/flow-preview/PreviewButtonGroup.vue'
 import TemplatePicker from '@/components/chat/TemplatePicker.vue'
 import MediaViewerDialog from '@/components/chat/MediaViewerDialog.vue'
+import PatientPanel from '@/components/chat/PatientPanel.vue'
+import PatientStrip from '@/components/chat/PatientStrip.vue'
+import { useClinicStore } from '@/stores/clinic'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
 import ConversationNotes from '@/components/chat/ConversationNotes.vue'
 import CallButton from '@/components/calling/CallButton.vue'
@@ -134,6 +145,9 @@ const isResuming = ref(false)
 const newMessagesCount = ref(0)
 const firstUnreadId = ref<string | null>(null)
 const isAtBottom = ref(true)
+// Messages that arrived while scrolled up reading older ones.
+const newBelowCount = ref(0)
+watch(isAtBottom, (atBottom) => { if (atBottom) newBelowCount.value = 0 })
 const SCROLL_BOTTOM_THRESHOLD = 80
 const isInfoPanelOpen = ref(false)
 const isNotesPanelOpen = ref(false)
@@ -222,6 +236,175 @@ const isServiceWindowExpired = computed(() => {
   if (!contact) return false
   return contact.service_window_open === false
 })
+
+const clinic = useClinicStore()
+const patientPanelView = ref('overview')
+const isPatientPanelOpen = ref(false)
+
+watch(() => contactsStore.currentContact?.phone_number, (phone) => {
+  if (phone) clinic.load(phone)
+  else clinic.clear()
+}, { immediate: true })
+
+function openPatientPanel(view: string) {
+  patientPanelView.value = view
+  isPatientPanelOpen.value = true
+}
+
+function useDraft(text: string) {
+  messageInput.value = text
+  nextTick(() => {
+    autoResizeTextarea()
+    messageInputRef.value?.focus()
+  })
+}
+
+// Numbers staff type without a country code get this one (Settings, General).
+const defaultCountryCode = ref('')
+
+// Frappe starts a contact's name with the language to reply in ("AR · Sara").
+const LANGUAGE_PREFIX = /^(AR|EN) · /
+
+function contactLanguage(contact: Contact): string {
+  const prefix = (contact.name || '').match(LANGUAGE_PREFIX)
+  if (prefix) return prefix[1]
+  if (contact.tags?.includes('Arabic')) return 'AR'
+  if (contact.tags?.includes('English')) return 'EN'
+  return ''
+}
+
+function contactTitle(contact: Contact): string {
+  return (contact.name || contact.phone_number).replace(LANGUAGE_PREFIX, '')
+}
+
+const SENDER_COLORS = [
+  'text-sky-200 light:text-sky-700',
+  'text-amber-200 light:text-amber-700',
+  'text-pink-200 light:text-pink-700',
+  'text-violet-200 light:text-violet-700',
+  'text-cyan-200 light:text-cyan-700',
+  'text-orange-200 light:text-orange-700',
+  'text-rose-200 light:text-rose-700',
+  'text-yellow-200 light:text-yellow-700',
+]
+
+const SENDER_DOTS = ['bg-sky-500', 'bg-amber-500', 'bg-pink-500', 'bg-violet-500', 'bg-cyan-500', 'bg-orange-500', 'bg-rose-500', 'bg-yellow-500']
+
+function senderIndex(name: string): number {
+  let hash = 2166136261
+  for (let i = 0; i < name.length; i++) hash = Math.imul(hash ^ name.charCodeAt(i), 16777619)
+  return Math.abs(hash) % SENDER_COLORS.length
+}
+
+function senderColor(name: string): string {
+  return SENDER_COLORS[senderIndex(name)]
+}
+
+function senderDot(name: string): string {
+  return SENDER_DOTS[senderIndex(name)]
+}
+
+function senderName(message: Message): string {
+  if (message.direction !== 'outgoing') return ''
+  return message.sent_by_label || message.sent_by_name || ''
+}
+
+function isAutomatedSender(message: Message): boolean {
+  return !!message.sent_by_label
+}
+
+function firstName(name: string): string {
+  return (name || '').split(' ')[0]
+}
+
+function formatWaiting(since?: string): string {
+  if (!since) return ''
+  const minutes = Math.max(1, Math.floor((Date.now() - new Date(since).getTime()) / 60000))
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}
+
+function assigneeName(contact: Contact): string {
+  return contact.assigned_user_name || ''
+}
+
+// Unread chats show in the browser tab, for staff working in another tab.
+const baseTitle = document.title
+watch(() => contactsStore.contacts.reduce((sum, contact) => sum + (contact.unread_count > 0 ? 1 : 0), 0), (count) => {
+  document.title = count > 0 ? `(${count}) ${baseTitle}` : baseTitle
+}, { immediate: true })
+onUnmounted(() => { document.title = baseTitle })
+
+const filterTabs = computed(() => {
+  const counts = contactsStore.filterCounts
+  return [
+    { key: 'all', label: t('chat.filterAll'), count: 0 },
+    { key: 'unread', label: t('chat.filterUnread'), count: counts.unread || 0 },
+    { key: 'waiting', label: t('chat.filterWaiting'), count: counts.waiting || 0 },
+    { key: 'mine', label: t('chat.filterMine'), count: counts.mine || 0 },
+    { key: 'unassigned', label: t('chat.filterUnassigned'), count: counts.unassigned || 0 },
+  ]
+})
+
+const searchedNumber = computed(() => normalizePhone(contactsStore.searchQuery, defaultCountryCode.value))
+const searchedNumberLabel = computed(() => formatPhone(searchedNumber.value, defaultCountryCode.value))
+const searchLooksLikePhone = computed(() => !!phoneDigits(contactsStore.searchQuery))
+const isStartingChat = ref(false)
+
+async function startChatWithNumber() {
+  if (!searchedNumber.value || isStartingChat.value) return
+  isStartingChat.value = true
+  try {
+    const response = await contactsService.create({ phone_number: searchedNumber.value, open_existing: true })
+    const contact = response.data.data || response.data
+    contactsStore.searchQuery = ''
+    await contactsStore.fetchContacts()
+    if (contact?.id) router.push({ name: 'chat-conversation', params: { contactId: contact.id } })
+  } catch (error) {
+    toast.error(getErrorMessage(error, t('chat.startChatFailed')))
+  } finally {
+    isStartingChat.value = false
+  }
+}
+
+async function markContactUnread(contact: Contact) {
+  try {
+    await contactsService.markUnread(contact.id)
+    contactsStore.markContactUnread(contact.id)
+    if (contactsStore.currentContact?.id === contact.id) router.push({ name: 'chat-conversation' })
+  } catch (error) {
+    toast.error(getErrorMessage(error, t('chat.markUnreadFailed')))
+  }
+}
+
+async function markContactReadFromList(contact: Contact) {
+  try {
+    await contactsService.markRead(contact.id)
+    contactsStore.markContactRead(contact.id)
+  } catch (error) {
+    toast.error(getErrorMessage(error, t('chat.markUnreadFailed')))
+  }
+}
+
+const heldMessages = computed(() => contactsStore.messages.filter(m => m.status === 'held'))
+const infoMessage = ref<Message | null>(null)
+
+function formatInfoTime(dateStr?: string): string {
+  if (!dateStr) return '—'
+  const date = new Date(dateStr)
+  return date.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+}
+
+async function cancelHeldMessage(message: Message) {
+  try {
+    await messagesService.cancelHeld(message.contact_id, message.id)
+    contactsStore.removeMessage(message.id)
+  } catch (error) {
+    toast.error(getErrorMessage(error, t('chat.cancelHeldFailed')))
+  }
+}
 
 function openTemplatePicker() {
   const btn = templatePickerRef.value?.querySelector('button')
@@ -439,6 +622,15 @@ onMounted(async () => {
 
   await contactsStore.fetchContacts()
 
+  // Browsers only allow this question after a click.
+  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    document.addEventListener('click', () => { Notification.requestPermission() }, { once: true })
+  }
+
+  organizationService.getSettings()
+    .then(response => { defaultCountryCode.value = response.data.data?.settings?.default_country_code || '' })
+    .catch(() => { /* typed numbers then need their country code */ })
+
   // Setup infinite scroll for contacts list
   await nextTick()
   contactsScroll.setup()
@@ -484,9 +676,13 @@ onMounted(async () => {
   window.addEventListener('focus', onUserActive)
 })
 
+// The unread line this chat already scrolled to, so each return doesn't jump again.
+let scrolledToUnreadId: string | null = null
+
 function onUserActive() {
   if (document.visibilityState !== 'visible' || !document.hasFocus()) return
-  if (!firstUnreadId.value) return
+  if (!firstUnreadId.value || firstUnreadId.value === scrolledToUnreadId) return
+  scrolledToUnreadId = firstUnreadId.value
   if (contactsStore.currentContact) {
     const contactId = contactsStore.currentContact.id
     contactsService.markRead(contactId)
@@ -547,7 +743,14 @@ function updateStickyDate(scrollContainer: HTMLElement) {
 }
 
 // Watch for route changes
-watch(contactId, async (newId) => {
+// Each chat keeps its own draft, so text typed for one patient can't go to another.
+const drafts = new Map<string, string>()
+
+watch(contactId, async (newId, oldId) => {
+  if (oldId) drafts.set(String(oldId), messageInput.value)
+  messageInput.value = newId ? drafts.get(String(newId)) || '' : ''
+  contactsStore.clearReplyingTo()
+  nextTick(autoResizeTextarea)
   if (newId) {
     notesStore.notes = []
     notesStore.hasMore = false
@@ -678,6 +881,8 @@ watch(() => contactsStore.messages.length, (newLen, oldLen) => {
   }
   if (isAtBottom.value || !isIncoming) {
     scrollToBottom()
+  } else {
+    newBelowCount.value += 1
   }
 })
 
@@ -707,18 +912,22 @@ function handleContactClick(contact: Contact) {
 }
 
 async function sendMessage() {
-  if (!messageInput.value.trim() || !contactsStore.currentContact) return
+  if (isSending.value || !messageInput.value.trim() || !contactsStore.currentContact) return
 
+  const targetId = contactsStore.currentContact.id
+  const body = messageInput.value
   isSending.value = true
   try {
     await contactsStore.sendMessage(
-      contactsStore.currentContact.id,
+      targetId,
       'text',
-      { body: messageInput.value },
+      { body },
       contactsStore.replyingTo?.id,
       selectedAccount.value || undefined
     )
-    messageInput.value = ''
+    drafts.delete(targetId)
+    // Keep anything typed while this was sending.
+    if (contactsStore.currentContact?.id === targetId && messageInput.value === body) messageInput.value = ''
     contactsStore.clearReplyingTo()
     resetTextareaHeight()
     await nextTick()
@@ -749,19 +958,24 @@ async function retryMessage(message: Message) {
     )
 
     // Remove the failed message from the list after successful retry
-    const messages = (contactsStore.messages as any).get?.(contactsStore.currentContact.id) as Message[] | undefined
-    if (messages) {
-      const index = messages.findIndex((m: Message) => m.id === message.id)
-      if (index !== -1) {
-        messages.splice(index, 1)
-      }
-    }
+    contactsStore.removeMessage(message.id)
 
     toast.success(t('chat.messageSent'))
   } catch (error) {
     toast.error(getErrorMessage(error, t('chat.sendMessageFailed')))
   } finally {
     retryingMessageId.value = null
+  }
+}
+
+let lastTypingSentAt = 0
+
+function onComposerInput() {
+  autoResizeTextarea()
+  const contact = contactsStore.currentContact
+  if (contact && Date.now() - lastTypingSentAt > 2500) {
+    lastTypingSentAt = Date.now()
+    wsService.sendAgentTyping(contact.id, authStore.user?.full_name || '')
   }
 }
 
@@ -884,12 +1098,25 @@ function handleCannedSelect(response: CannedResponse) {
   )
   cannedParamNames.value = tokens
   cannedParamValues.value = Object.fromEntries(tokens.map(t => [t, '']))
-  // Drop the slash command (or any stray text) so the textarea starts clean.
-  messageInput.value = ''
-  resetTextareaHeight()
+  // Drop only the slash command; what was typed before it stays.
+  messageInput.value = messageInput.value.replace(/(^|\s)\/\S*$/, '$1')
   cannedPickerOpen.value = false
   cannedSearchQuery.value = ''
+  // Plain text goes into the box to edit first. Buttons and blanks need the dialog.
+  if (!response.buttons?.length && !tokens.length) {
+    insertIntoComposer(cannedPreview.value)
+    return
+  }
   cannedDialogOpen.value = true
+}
+
+function insertIntoComposer(text: string) {
+  const before = messageInput.value.trimEnd()
+  messageInput.value = before ? `${before} ${text}` : text
+  nextTick(() => {
+    autoResizeTextarea()
+    messageInputRef.value?.focus()
+  })
 }
 
 async function sendCannedResponse() {
@@ -903,6 +1130,11 @@ async function sendCannedResponse() {
 
   const body = cannedPreview.value
   const responseId = selectedCannedResponse.value.id
+  if (!selectedCannedResponse.value.buttons?.length) {
+    insertIntoComposer(body)
+    cannedDialogOpen.value = false
+    return
+  }
   // Substitute {{...}} tokens in every button field — same rules as the body —
   // so URLs like https://x.com/u/{{phone_number}} resolve at send time.
   const buttons = (selectedCannedResponse.value.buttons || []).map(b => ({
@@ -1216,7 +1448,10 @@ async function assignContactToUser(userId: string | null) {
     // Update current contact with new assignment
     contactsStore.currentContact = {
       ...contactsStore.currentContact,
-      assigned_user_id: userId || undefined
+      assigned_user_id: userId || undefined,
+      assigned_user_name: userId
+        ? (userId === authStore.user?.id ? authStore.user?.full_name : usersStore.users.find(u => u.id === userId)?.full_name)
+        : undefined
     }
     // Refresh contacts list
     await contactsStore.fetchContacts()
@@ -1304,6 +1539,8 @@ function getMessageStatusIcon(status: string) {
       return CheckCheck
     case 'failed':
       return AlertCircle
+    case 'held':
+      return Hourglass
     default:
       return Clock
   }
@@ -1329,7 +1566,9 @@ function formatContactTime(dateStr?: string) {
   if (!dateStr) return ''
   const date = new Date(dateStr)
   const now = new Date()
-  const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000)
+  // Calendar days: last night at 23:50 is Yesterday, even 10 minutes later.
+  const startOf = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime()
+  const diffDays = Math.round((startOf(now) - startOf(date)) / 86400000)
 
   if (diffDays === 0) {
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
@@ -1589,8 +1828,23 @@ async function handleFileSelect(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = '' // reset so the same file can be selected again
-  if (!file) return
+  if (file) await prepareFile(file)
+}
 
+function handleComposerPaste(event: ClipboardEvent) {
+  const file = event.clipboardData?.files?.[0]
+  if (file) {
+    event.preventDefault()
+    prepareFile(file)
+  }
+}
+
+function handleChatDrop(event: DragEvent) {
+  const file = event.dataTransfer?.files?.[0]
+  if (file) prepareFile(file)
+}
+
+async function prepareFile(file: File) {
   // Validate file type
   const allowedTypes = ['image/', 'video/', 'audio/', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument']
   const isAllowed = allowedTypes.some(type => file.type.startsWith(type))
@@ -1800,6 +2054,35 @@ async function sendMediaMessage() {
         </div>
       </div>
 
+      <!-- Worklist filters -->
+      <div class="flex flex-wrap items-center gap-0.5 px-2 py-1.5 border-b border-white/[0.08] light:border-gray-200">
+        <button
+          v-for="tab in filterTabs"
+          :key="tab.key"
+          type="button"
+          :class="[
+            'shrink-0 inline-flex items-center gap-1 h-6 px-1.5 rounded-full text-[11px] font-medium transition-colors',
+            contactsStore.listFilter === tab.key
+              ? 'bg-emerald-600 text-white'
+              : 'bg-white/[0.06] text-white/60 hover:bg-white/[0.1] light:bg-gray-100 light:text-gray-600 light:hover:bg-gray-200'
+          ]"
+          @click="contactsStore.setListFilter(tab.key)"
+        >
+          {{ tab.label }}
+          <span
+            v-if="tab.count > 0"
+            :class="[
+              'min-w-[14px] h-4 px-0.5 rounded-full text-[10px] leading-4 text-center',
+              contactsStore.listFilter === tab.key
+                ? 'bg-white/25 text-white'
+                : tab.key === 'unread' ? 'bg-emerald-500/20 text-emerald-400 light:bg-emerald-100 light:text-emerald-700'
+                : tab.key === 'waiting' ? 'bg-amber-500/20 text-amber-400 light:bg-amber-100 light:text-amber-700'
+                : 'bg-white/[0.1] text-white/60 light:bg-gray-200 light:text-gray-600'
+            ]"
+          >{{ tab.count }}</span>
+        </button>
+      </div>
+
       <!-- Contacts -->
       <ScrollArea :ref="(el: any) => contactsScroll.scrollAreaRef.value = el" orientation="vertical" class="flex-1">
         <div class="py-1 w-full">
@@ -1807,7 +2090,7 @@ async function sendMediaMessage() {
             v-for="contact in contactsStore.sortedContacts"
             :key="contact.id"
             :class="[
-              'flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/[0.04] light:hover:bg-gray-50 transition-colors',
+              'group flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/[0.04] light:hover:bg-gray-50 transition-colors',
               contactsStore.currentContact?.id === contact.id && 'bg-white/[0.08] light:bg-gray-100'
             ]"
             @click="handleContactClick(contact)"
@@ -1815,28 +2098,92 @@ async function sendMediaMessage() {
             <Avatar class="h-9 w-9 ring-2 ring-white/[0.1] light:ring-gray-200">
               <AvatarImage :src="contact.avatar_url" />
               <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)">
-                {{ getInitials(contact.name || contact.phone_number) }}
+                {{ getInitials(contactTitle(contact)) }}
               </AvatarFallback>
             </Avatar>
             <div class="flex-1 min-w-0">
               <div class="flex items-center justify-between gap-2">
-                <p
-                  class="flex-1 min-w-0 text-sm font-medium truncate text-white light:text-gray-900"
-                  :title="contact.name || contact.phone_number"
+                <div class="flex-1 min-w-0 flex items-center gap-1.5">
+                  <p
+                    :class="[
+                      'min-w-0 text-sm truncate text-white light:text-gray-900',
+                      contact.unread_count > 0 ? 'font-semibold' : 'font-medium'
+                    ]"
+                    :title="contactTitle(contact)"
+                    dir="auto"
+                  >
+                    {{ contactTitle(contact) }}
+                  </p>
+                  <span
+                    v-if="contactLanguage(contact)"
+                    :class="[
+                      'shrink-0 h-4 px-1 rounded text-[9px] leading-4 font-bold tracking-wide',
+                      contactLanguage(contact) === 'AR'
+                        ? 'bg-violet-500/20 text-violet-300 light:bg-violet-100 light:text-violet-700'
+                        : 'bg-sky-500/20 text-sky-300 light:bg-sky-100 light:text-sky-700'
+                    ]"
+                  >{{ contactLanguage(contact) }}</span>
+                </div>
+                <span
+                  :class="[
+                    'flex-shrink-0 text-[11px] group-hover:hidden',
+                    contact.unread_count > 0 ? 'text-emerald-400 light:text-emerald-600 font-medium' : 'text-white/40 light:text-gray-500'
+                  ]"
                 >
-                  {{ contact.name || contact.phone_number }}
-                </p>
-                <span class="flex-shrink-0 text-[11px] text-white/40 light:text-gray-500">
                   {{ formatContactTime(contact.last_message_at) }}
                 </span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger as-child>
+                    <button
+                      type="button"
+                      :aria-label="$t('chat.chatOptions')"
+                      class="flex flex-shrink-0 h-4 w-0 opacity-0 overflow-hidden group-hover:w-4 group-hover:opacity-100 data-[state=open]:w-4 data-[state=open]:opacity-100 items-center justify-center rounded text-white/60 hover:text-white light:text-gray-500 light:hover:text-gray-900"
+                      @click.stop
+                    >
+                      <MoreVertical class="h-3.5 w-3.5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" @click.stop>
+                    <DropdownMenuItem v-if="contact.unread_count === 0" @click="markContactUnread(contact)">
+                      <MailWarning class="mr-2 h-4 w-4" />
+                      <span>{{ $t('chat.markAsUnread') }}</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem v-else @click="markContactReadFromList(contact)">
+                      <MailOpen class="mr-2 h-4 w-4" />
+                      <span>{{ $t('chat.markAsRead') }}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
               <div class="flex items-center justify-between gap-2">
-                <p class="flex-1 min-w-0 text-xs text-white/50 light:text-gray-500 truncate">
-                  {{ contact.phone_number }}
+                <p
+                  :class="[
+                    'flex-1 min-w-0 text-xs truncate',
+                    contact.last_send_failed ? 'text-red-400 light:text-red-600' : contact.unread_count > 0 ? 'text-white/75 light:text-gray-800' : 'text-white/50 light:text-gray-500'
+                  ]"
+                >
+                  <AlertCircle v-if="contact.last_send_failed" class="inline h-3 w-3 -mt-0.5 mr-0.5" />
+                  <span v-else-if="contact.last_message_direction === 'outgoing' && contact.last_reply_by" :class="['font-medium', senderColor(contact.last_reply_by)]">{{ firstName(contact.last_reply_by) }}: </span>
+                  <span v-if="contact.last_send_failed">{{ $t('chat.notDelivered') }}: </span>
+                  <span dir="auto">{{ contact.last_message_preview || contact.phone_number }}</span>
                 </p>
                 <Badge v-if="contact.unread_count > 0" class="flex-shrink-0 h-5 text-[10px] bg-emerald-500/20 text-emerald-400 light:bg-emerald-100 light:text-emerald-700">
-                  {{ contact.unread_count }}
+                  {{ contact.marked_unread ? '•' : contact.unread_count }}
                 </Badge>
+                <span
+                  v-else-if="contact.waiting_since"
+                  class="flex-shrink-0 inline-flex items-center gap-0.5 h-5 px-1.5 rounded-full text-[10px] font-medium bg-amber-500/15 text-amber-400 light:bg-amber-100 light:text-amber-700"
+                  :title="$t('chat.waitingForReply')"
+                >
+                  <Clock class="h-2.5 w-2.5" />{{ formatWaiting(contact.waiting_since) }}
+                </span>
+              </div>
+              <div class="flex items-center gap-1.5 mt-0.5 text-[11px] text-white/40 light:text-gray-500">
+                <span class="truncate">{{ formatPhone(contact.phone_number, defaultCountryCode) }}</span>
+                <span v-if="assigneeName(contact)" class="shrink-0 inline-flex items-center gap-1 ml-auto">
+                  <span :class="['h-1.5 w-1.5 rounded-full', senderDot(assigneeName(contact))]" />
+                  {{ firstName(assigneeName(contact)) }}
+                </span>
               </div>
             </div>
           </div>
@@ -1846,9 +2193,24 @@ async function sendMediaMessage() {
             <Loader2 class="h-5 w-5 mx-auto animate-spin text-white/40 light:text-gray-400" />
           </div>
 
-          <div v-if="contactsStore.sortedContacts.length === 0" class="p-3 text-center text-white/40 light:text-gray-500">
+          <div v-if="contactsStore.sortedContacts.length === 0 && searchedNumber" class="p-3">
+            <div class="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] light:bg-emerald-50 light:border-emerald-200 p-3 text-center">
+              <p class="text-xs text-white/60 light:text-gray-600">{{ $t('chat.noContactForNumber') }}</p>
+              <Button
+                size="sm"
+                class="w-full mt-2 bg-emerald-600 hover:bg-emerald-500 text-white"
+                :disabled="isStartingChat"
+                @click="startChatWithNumber"
+              >
+                <Loader2 v-if="isStartingChat" class="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                <MessageCirclePlus v-else class="h-3.5 w-3.5 mr-1.5" />
+                <span dir="ltr">{{ $t('chat.messageNumber', { number: searchedNumberLabel }) }}</span>
+              </Button>
+            </div>
+          </div>
+          <div v-else-if="contactsStore.sortedContacts.length === 0" class="p-3 text-center text-white/40 light:text-gray-500">
             <User class="h-6 w-6 mx-auto mb-1.5 opacity-50" />
-            <p class="text-sm">{{ $t('chat.noContacts') }}</p>
+            <p class="text-sm">{{ searchLooksLikePhone ? $t('chat.typeFullNumber') : $t('chat.noContacts') }}</p>
           </div>
         </div>
       </ScrollArea>
@@ -1878,14 +2240,30 @@ async function sendMediaMessage() {
             <Avatar class="h-8 w-8 ring-2 ring-white/[0.1] light:ring-gray-200">
               <AvatarImage :src="contactsStore.currentContact.avatar_url" />
               <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contactsStore.currentContact.name || contactsStore.currentContact.phone_number)">
-                {{ getInitials(contactsStore.currentContact.name || contactsStore.currentContact.phone_number) }}
+                {{ getInitials(contactTitle(contactsStore.currentContact)) }}
               </AvatarFallback>
             </Avatar>
             <div>
               <div class="flex items-center gap-1.5">
-                <p class="text-sm font-medium text-white light:text-gray-900">
-                  {{ contactsStore.currentContact.name || contactsStore.currentContact.phone_number }}
+                <p class="text-sm font-medium text-white light:text-gray-900" dir="auto">
+                  {{ contactTitle(contactsStore.currentContact) }}
                 </p>
+                <span
+                  v-if="contactLanguage(contactsStore.currentContact)"
+                  :class="[
+                    'shrink-0 h-4 px-1 rounded text-[9px] leading-4 font-bold tracking-wide',
+                    contactLanguage(contactsStore.currentContact) === 'AR'
+                      ? 'bg-violet-500/20 text-violet-300 light:bg-violet-100 light:text-violet-700'
+                      : 'bg-sky-500/20 text-sky-300 light:bg-sky-100 light:text-sky-700'
+                  ]"
+                  :title="$t('chat.replyLanguage')"
+                >{{ contactLanguage(contactsStore.currentContact) }}</span>
+                <TagBadge
+                  v-for="tagName in (contactsStore.currentContact.tags || []).filter(t => t !== 'Arabic' && t !== 'English').slice(0, 3)"
+                  :key="tagName"
+                  :color="tagsStore.getTagByName(tagName)?.color"
+                  class="text-[10px] h-4"
+                >{{ tagName }}</TagBadge>
                 <Badge v-if="activeTransferId" class="text-[10px] h-5 bg-orange-500/20 text-orange-400 light:bg-orange-100 light:text-orange-700">
                   Paused
                 </Badge>
@@ -1893,8 +2271,20 @@ async function sendMediaMessage() {
                   {{ $t('chat.marketingOptOut', 'Marketing Opt-out') }}
                 </Badge>
               </div>
-              <p class="text-[11px] text-white/50 light:text-gray-500">
-                {{ contactsStore.currentContact.phone_number }}
+              <p class="text-[11px] text-white/50 light:text-gray-500 flex items-center gap-1.5">
+                <span dir="ltr">{{ formatPhone(contactsStore.currentContact.phone_number, defaultCountryCode) }}</span>
+                <template v-if="assigneeName(contactsStore.currentContact)">
+                  <span class="opacity-40">·</span>
+                  <span class="inline-flex items-center gap-1">
+                    <UserCheck class="h-3 w-3" />{{ assigneeName(contactsStore.currentContact) }}
+                  </span>
+                </template>
+                <template v-if="contactsStore.currentContact.last_reply_by">
+                  <span class="opacity-40">·</span>
+                  <span>{{ $t('chat.lastReplyBy') }}
+                    <span :class="['font-medium', senderColor(contactsStore.currentContact.last_reply_by)]">{{ firstName(contactsStore.currentContact.last_reply_by) }}</span>
+                  </span>
+                </template>
               </p>
             </div>
           </div>
@@ -1984,6 +2374,17 @@ async function sendMediaMessage() {
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>{{ $t('chat.contactOptions') }}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  v-if="contactsStore.currentContact.assigned_user_id !== authStore.user?.id"
+                  @click="assignContactToUser(authStore.user!.id)"
+                >
+                  <UserCheck class="mr-2 h-4 w-4" />
+                  <span>{{ $t('chat.assignToMe') }}</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem @click="markContactUnread(contactsStore.currentContact!)">
+                  <MailWarning class="mr-2 h-4 w-4" />
+                  <span>{{ $t('chat.markAsUnread') }}</span>
+                </DropdownMenuItem>
                 <DropdownMenuItem v-if="canAssignContacts" @click="isAssignDialogOpen = true">
                   <UserPlus class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.assignToAgent') }}</span>
@@ -2004,6 +2405,9 @@ async function sendMediaMessage() {
             </DropdownMenu>
           </div>
         </div>
+
+        <!-- What staff need to know about this patient -->
+        <PatientStrip v-if="!isPatientPanelOpen" @open="openPatientPanel" />
 
         <!-- Account Tabs (shown when contact has messages from multiple WhatsApp accounts) -->
         <div
@@ -2028,7 +2432,15 @@ async function sendMediaMessage() {
         </div>
 
         <!-- Messages -->
-        <div class="relative flex-1 min-h-0 overflow-hidden">
+        <div class="relative flex-1 min-h-0 overflow-hidden" @dragover.prevent @drop.prevent="handleChatDrop">
+          <button
+            v-if="newBelowCount > 0"
+            type="button"
+            class="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 px-3 h-7 rounded-full text-xs font-medium shadow-md bg-emerald-600 text-white hover:bg-emerald-500"
+            @click="scrollToBottom(); newBelowCount = 0"
+          >
+            {{ $t('chat.newBelow', { count: newBelowCount }) }}
+          </button>
           <!-- Loading overlay while switching contacts / loading the first page -->
           <Spinner v-if="contactsStore.isLoadingMessages" overlay />
 
@@ -2077,8 +2489,17 @@ async function sendMediaMessage() {
                   </div>
                 </div>
 
+              <!-- Something that happened in the clinic system; the patient doesn't see these -->
+              <div v-if="message.message_type === 'event'" :id="`message-${message.id}`" class="flex justify-center my-1">
+                <span class="inline-flex items-center gap-1.5 max-w-[85%] px-2.5 py-1 rounded-md text-[11px] bg-indigo-500/15 text-indigo-200 light:bg-indigo-50 light:text-indigo-800">
+                  <CalendarClock class="h-3 w-3 shrink-0" />
+                  <span>{{ message.content?.body }} · {{ formatMessageTime(message.created_at) }}</span>
+                </span>
+              </div>
+
               <!-- Message bubble -->
               <div
+                v-else
                 :id="`message-${message.id}`"
                 :class="[
                   'flex group',
@@ -2088,9 +2509,11 @@ async function sendMediaMessage() {
               <div
                 :class="[
                   'chat-bubble',
-                  message.direction === 'outgoing' ? 'chat-bubble-outgoing' : 'chat-bubble-incoming'
+                  message.direction === 'outgoing' ? 'chat-bubble-outgoing' : 'chat-bubble-incoming',
+                  message.status === 'held' && 'chat-bubble-held'
                 ]"
               >
+
                 <!-- Reply preview (if this message is replying to another) -->
                 <div
                   v-if="message.is_reply && message.reply_to_message"
@@ -2264,12 +2687,12 @@ async function sendMediaMessage() {
                 <!-- Button reply - WhatsApp style -->
                 <div v-if="message.message_type === 'button_reply'" class="button-reply-bubble">
                   <span class="whitespace-pre-wrap break-words">{{ getMessageContent(message) }}</span>
-                  <span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span></span>
+                  <span class="chat-bubble-time"><button v-if="senderName(message)" type="button" :class="['chat-bubble-sender', isAutomatedSender(message) ? '' : senderColor(senderName(message))]" @click="infoMessage = message"><Bot v-if="isAutomatedSender(message)" class="h-3 w-3" />{{ senderName(message) }}</button><span>{{ formatMessageTime(message.created_at) }}</span></span>
                 </div>
                 <!-- Text content (for text messages or captions) -->
-                <span v-else-if="getMessageContent(message)" class="whitespace-pre-wrap break-words">{{ getMessageContent(message) }}<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
+                <span v-else-if="getMessageContent(message)" class="block whitespace-pre-wrap break-words" dir="auto">{{ getMessageContent(message) }}<span class="chat-bubble-time"><button v-if="senderName(message)" type="button" :class="['chat-bubble-sender', isAutomatedSender(message) ? '' : senderColor(senderName(message))]" @click="infoMessage = message"><Bot v-if="isAutomatedSender(message)" class="h-3 w-3" />{{ senderName(message) }}</button><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing' && message.status !== 'held'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
                 <!-- Fallback for media without URL -->
-                <span v-else-if="isMediaMessage(message) && !message.media_url" class="text-muted-foreground italic">[{{ message.message_type.charAt(0).toUpperCase() + message.message_type.slice(1) }}]<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
+                <span v-else-if="isMediaMessage(message) && !message.media_url" class="text-muted-foreground italic">[{{ message.message_type.charAt(0).toUpperCase() + message.message_type.slice(1) }}]<span class="chat-bubble-time"><button v-if="senderName(message)" type="button" :class="['chat-bubble-sender', isAutomatedSender(message) ? '' : senderColor(senderName(message))]" @click="infoMessage = message"><Bot v-if="isAutomatedSender(message)" class="h-3 w-3" />{{ senderName(message) }}</button><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
                 <!-- Interactive buttons - WhatsApp style -->
                 <div
                   v-if="getInteractiveButtons(message).length > 0"
@@ -2349,6 +2772,12 @@ async function sendMediaMessage() {
                     {{ reaction.emoji }}
                   </span>
                 </div>
+                <!-- Held until the patient replies -->
+                <span v-if="message.status === 'held'" class="chat-bubble-held-note">
+                  <Hourglass class="h-3 w-3 shrink-0" />
+                  <span class="flex-1">{{ $t('chat.heldNote') }}</span>
+                  <button type="button" class="underline shrink-0" @click="cancelHeldMessage(message)">{{ $t('common.cancel') }}</button>
+                </span>
                 <!-- Failed message error (not for template messages) -->
                 <span
                   v-if="message.status === 'failed' && message.direction === 'outgoing' && message.message_type !== 'template'"
@@ -2426,7 +2855,7 @@ async function sendMediaMessage() {
                   <Reply class="h-3 w-3" />
                 </Button>
                 <Button
-                  v-if="message.status === 'failed' && message.message_type !== 'template'"
+                  v-if="message.status === 'failed' && message.message_type === 'text'"
                   variant="ghost"
                   size="icon"
                   class="h-6 w-6 text-destructive hover:text-destructive"
@@ -2445,16 +2874,31 @@ async function sendMediaMessage() {
         </ScrollArea>
         </div>
 
-        <!-- Service window expired banner -->
+        <!-- Someone else is answering this patient -->
+        <div
+          v-if="contactsStore.agentTyping"
+          class="px-4 py-1 border-t border-sky-500/20 bg-sky-500/10 light:bg-sky-50 text-xs text-sky-300 light:text-sky-800"
+        >
+          {{ $t('chat.colleagueTyping', { name: contactsStore.agentTyping }) }}
+        </div>
+
+        <!-- 24-hour window closed: staff type normally, the message waits for the patient -->
         <div
           v-if="isServiceWindowExpired"
-          class="px-4 py-2.5 border-t border-red-500/20 bg-red-500/10 flex items-center gap-2"
+          class="px-4 py-2 border-t border-amber-500/25 bg-amber-500/10 light:bg-amber-50 light:border-amber-200 flex items-center gap-2"
         >
-          <Clock class="h-4 w-4 text-red-500 shrink-0" />
-          <span class="text-sm text-red-500 flex-1">{{ $t('chat.serviceWindowExpired') }}</span>
-          <Button variant="outline" size="sm" class="border-red-500/30 text-red-500 hover:bg-red-500/10 shrink-0" @click="openTemplatePicker">
-            {{ $t('chat.sendTemplateAction') }}
-          </Button>
+          <Hourglass class="h-4 w-4 text-amber-400 light:text-amber-600 shrink-0" />
+          <div class="flex-1 min-w-0">
+            <p class="text-xs font-medium text-amber-300 light:text-amber-800">
+              {{ heldMessages.length ? $t('chat.heldWaiting', { name: contactTitle(contactsStore.currentContact), count: heldMessages.length }) : $t('chat.windowClosedTitle', { name: contactTitle(contactsStore.currentContact) }) }}
+            </p>
+            <p class="text-[11px] text-amber-200/70 light:text-amber-700">
+              {{ heldMessages.length ? $t('chat.heldWaitingHint') : $t('chat.windowClosedHint') }}
+            </p>
+          </div>
+          <button type="button" class="shrink-0 text-[11px] underline text-amber-300 light:text-amber-800" @click="openTemplatePicker">
+            {{ $t('chat.sendTemplateInstead') }}
+          </button>
         </div>
 
         <!-- Reply indicator -->
@@ -2543,13 +2987,27 @@ async function sendMediaMessage() {
               ref="messageInputRef"
               v-model="messageInput"
               :placeholder="$t('chat.typeMessage') + '...'"
+              dir="auto"
               rows="1"
               class="flex-1 bg-transparent text-[14px] text-white light:text-gray-900 placeholder:text-white/30 light:placeholder:text-gray-400 focus:outline-none resize-none min-h-[36px] max-h-[120px] py-2 overflow-y-auto"
               @keydown.enter.exact.prevent="sendMessage"
-              @input="autoResizeTextarea"
+              @input="onComposerInput"
+              @paste="handleComposerPaste"
             />
-            <button type="submit" class="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 light:bg-emerald-500 light:hover:bg-emerald-600 flex items-center justify-center transition-colors disabled:opacity-50" :disabled="!messageInput.trim() || isSending">
-              <Send class="w-4 h-4 text-white" />
+            <button
+              type="submit"
+              :class="[
+                'h-9 rounded-lg flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50',
+                isServiceWindowExpired
+                  ? 'px-3 shrink-0 text-xs font-medium text-white bg-amber-600 hover:bg-amber-500'
+                  : 'w-9 bg-emerald-600 hover:bg-emerald-500 light:bg-emerald-500 light:hover:bg-emerald-600'
+              ]"
+              :disabled="!messageInput.trim() || isSending"
+            >
+              <template v-if="isServiceWindowExpired">
+                <Hourglass class="w-3.5 h-3.5" />{{ $t('chat.sendWhenTheyReply') }}
+              </template>
+              <Send v-else class="w-4 h-4 text-white" />
             </button>
           </form>
         </div>
@@ -2563,6 +3021,15 @@ async function sendMediaMessage() {
       @close="isNotesPanelOpen = false"
     />
 
+    <!-- Patient details and clinic actions -->
+    <PatientPanel
+      v-if="contactsStore.currentContact && isPatientPanelOpen"
+      v-model:view="patientPanelView"
+      :contact="contactsStore.currentContact"
+      @close="isPatientPanelOpen = false"
+      @draft="useDraft"
+    />
+
     <!-- Contact Info Panel -->
     <ContactInfoPanel
       v-if="contactsStore.currentContact && isInfoPanelOpen"
@@ -2571,6 +3038,29 @@ async function sendMediaMessage() {
       @close="isInfoPanelOpen = false"
       @tags-updated="(tags) => contactsStore.updateContactTags(contactsStore.currentContact!.id, tags)"
     />
+
+    <!-- Message info -->
+    <Dialog :open="!!infoMessage" @update:open="(open) => !open && (infoMessage = null)">
+      <DialogContent class="max-w-xs">
+        <DialogHeader>
+          <DialogTitle class="text-sm">{{ $t('chat.messageInfo') }}</DialogTitle>
+        </DialogHeader>
+        <dl v-if="infoMessage" class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
+          <dt class="text-muted-foreground">{{ $t('chat.infoSentBy') }}</dt>
+          <dd class="font-medium">{{ senderName(infoMessage) || '—' }}</dd>
+          <template v-if="infoMessage.template_name">
+            <dt class="text-muted-foreground">{{ $t('chat.infoTemplate') }}</dt>
+            <dd class="break-all">{{ infoMessage.template_name }}</dd>
+          </template>
+          <dt class="text-muted-foreground">{{ $t('chat.infoSent') }}</dt>
+          <dd>{{ formatInfoTime(infoMessage.created_at) }}</dd>
+          <dt class="text-muted-foreground">{{ $t('chat.infoDelivered') }}</dt>
+          <dd>{{ formatInfoTime(infoMessage.delivered_at) }}</dd>
+          <dt class="text-muted-foreground">{{ $t('chat.infoRead') }}</dt>
+          <dd>{{ formatInfoTime(infoMessage.read_at) }}</dd>
+        </dl>
+      </DialogContent>
+    </Dialog>
 
     <!-- Template Params Dialog -->
     <Dialog v-model:open="templateDialogOpen">
@@ -2692,7 +3182,7 @@ async function sendMediaMessage() {
           <Button id="canned-response-cancel" variant="outline" @click="cannedDialogOpen = false">{{ $t('common.cancel') }}</Button>
           <Button id="canned-response-send" :disabled="isSendingCanned" @click="sendCannedResponse">
             <Loader2 v-if="isSendingCanned" class="h-4 w-4 mr-2 animate-spin" />
-            {{ $t('chat.send') }}
+            {{ selectedCannedResponse?.buttons?.length ? $t('chat.send') : $t('chat.insert') }}
           </Button>
         </div>
         </div>

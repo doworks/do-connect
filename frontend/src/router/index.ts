@@ -210,6 +210,12 @@ const router = createRouter({
           meta: { permission: 'contacts' }
         },
         {
+          path: 'settings/calling-hours',
+          name: 'calling-hours',
+          component: () => import('@/views/settings/CallingHoursView.vue'),
+          meta: { permission: 'settings.calling' }
+        },
+        {
           path: 'settings/tags',
           name: 'tags',
           component: () => import('@/views/settings/TagsView.vue'),

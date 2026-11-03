@@ -189,7 +189,7 @@ export const accountsService = {
 }
 
 export const contactsService = {
-  list: (params?: { search?: string; page?: number; limit?: number; tags?: string }) =>
+  list: (params?: { search?: string; page?: number; limit?: number; tags?: string; filter?: string }) =>
     api.get('/contacts', { params }),
   get: (id: string) => api.get(`/contacts/${id}`),
   create: (data: any) => api.post('/contacts', data),
@@ -200,7 +200,8 @@ export const contactsService = {
   updateTags: (id: string, tags: string[]) =>
     api.put(`/contacts/${id}/tags`, { tags }),
   getSessionData: (id: string) => api.get(`/contacts/${id}/session-data`),
-  markRead: (id: string) => api.post(`/contacts/${encodeURIComponent(id)}/mark-read`)
+  markRead: (id: string) => api.post(`/contacts/${encodeURIComponent(id)}/mark-read`),
+  markUnread: (id: string) => api.post(`/contacts/${encodeURIComponent(id)}/mark-unread`)
 }
 
 // Generic Import/Export Service
@@ -262,7 +263,34 @@ export const dataService = {
   }
 }
 
+// When the clinic takes calls and which staff ring.
+export const callRulesService = {
+  get: () => api.get('/calling/rules'),
+  save: (rules: any) => api.put('/calling/rules', rules),
+}
+
+// Clinic features, answered by the clinic system through the Whatomate server.
+export const clinicService = {
+  context: (phone: string) => api.get('/clinic/context', { params: { phone } }),
+  bookingOptions: (patient: string) => api.get('/clinic/booking-options', { params: { patient } }),
+  slots: (params: { practitioner: string; date: string; appointment_type?: string; appointment?: string }) =>
+    api.get('/clinic/slots', { params }),
+  book: (data: any) => api.post('/clinic/book', data),
+  reschedule: (data: any) => api.post('/clinic/reschedule', data),
+  confirm: (appointment: string) => api.post('/clinic/confirm', { appointment }),
+  cancel: (appointment: string, reason: string) => api.post('/clinic/cancel', { appointment, reason }),
+  sendDocument: (doctype: string, name: string) => api.post('/clinic/send-document', { doctype, name }),
+  sendHealthForm: (patient: string) => api.post('/clinic/send-health-form', { patient }),
+  findPatients: (query: string) => api.get('/clinic/find-patients', { params: { query } }),
+  createPatient: (data: any) => api.post('/clinic/patients', data),
+  linkNumber: (patient: string, phone: string) => api.post('/clinic/link-number', { patient, phone }),
+  frappeLink: (doctype: string, name: string) =>
+    `${(window as any).__FRAPPE_URL__ || ''}/app/${doctype.toLowerCase().replace(/ /g, '-')}/${encodeURIComponent(name)}`,
+}
+
 export const messagesService = {
+  cancelHeld: (contactId: string, messageId: string) =>
+    api.delete(`/contacts/${contactId}/messages/${messageId}/held`),
   list: (contactId: string, params?: { page?: number; limit?: number; before_id?: string; account?: string }) =>
     api.get(`/contacts/${contactId}/messages`, { params }),
   send: (
@@ -711,6 +739,9 @@ export const organizationService = {
   getSettings: () => api.get('/org/settings'),
   updateSettings: (data: {
     mask_phone_numbers?: boolean
+    default_country_code?: string
+    unlock_template_en?: string
+    unlock_template_ar?: string
     timezone?: string
     date_format?: string
     name?: string

@@ -241,6 +241,8 @@ func (c *Client) handleMessage(data []byte) {
 	switch msg.Type {
 	case TypeSetContact:
 		c.handleSetContact(msg.Payload)
+	case TypeAgentTyping:
+		c.handleAgentTyping(msg.Payload)
 	case TypePing:
 		c.sendPong()
 	}
@@ -271,6 +273,36 @@ func (c *Client) handleSetContact(payload any) {
 			"user_id", c.userID,
 			"contact_id", contactID)
 	}
+}
+
+// handleAgentTyping tells others viewing the chat that this person is replying.
+func (c *Client) handleAgentTyping(payload any) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	var typing struct {
+		ContactID string `json:"contact_id"`
+		Name      string `json:"name"`
+	}
+	if err := json.Unmarshal(data, &typing); err != nil {
+		return
+	}
+	contactID, err := uuid.Parse(typing.ContactID)
+	if err != nil {
+		return
+	}
+	if len(typing.Name) > 100 {
+		typing.Name = typing.Name[:100]
+	}
+	c.hub.BroadcastToContact(c.organizationID, contactID, WSMessage{
+		Type: TypeAgentTyping,
+		Payload: map[string]any{
+			"contact_id": contactID.String(),
+			"user_id":    c.userID.String(),
+			"name":       typing.Name,
+		},
+	})
 }
 
 // SendChan returns the client's send channel for use in tests.

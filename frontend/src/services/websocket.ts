@@ -12,13 +12,24 @@ let notificationSound: HTMLAudioElement | null = null
 
 function playNotificationSound() {
   if (!notificationSound) {
-    notificationSound = new Audio('/notification.mp3')
+    const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
+    notificationSound = new Audio(`${basePath}/notification.mp3`)
     notificationSound.volume = 0.5
   }
   notificationSound.currentTime = 0
   notificationSound.play().catch(() => {
     // Ignore autoplay errors (browser may block until user interaction)
   })
+}
+
+function showDesktopNotification(title: string, body: string, contactId: string) {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+  const notification = new Notification(title, { body, tag: contactId })
+  notification.onclick = () => {
+    window.focus()
+    router.push(`/chat/${contactId}`)
+    notification.close()
+  }
 }
 
 // Show toast notification with click handler
@@ -45,6 +56,8 @@ function showNotification(title: string, body: string, contactId: string) {
 const WS_TYPE_AUTH = 'auth'
 const WS_TYPE_NEW_MESSAGE = 'new_message'
 const WS_TYPE_STATUS_UPDATE = 'status_update'
+const WS_TYPE_CONTACT_READ_STATE = 'contact_read_state'
+const WS_TYPE_AGENT_TYPING = 'agent_typing'
 const WS_TYPE_SET_CONTACT = 'set_contact'
 const WS_TYPE_PING = 'ping'
 const WS_TYPE_PONG = 'pong'
@@ -226,6 +239,14 @@ class WebSocketService {
         case WS_TYPE_STATUS_UPDATE:
           this.handleStatusUpdate(store, message.payload)
           break
+        case WS_TYPE_AGENT_TYPING:
+          // The server sends this to everyone in the chat, including the typist.
+          if (message.payload.user_id !== useAuthStore().user?.id) store.noteAgentTyping(message.payload)
+          break
+        case WS_TYPE_CONTACT_READ_STATE:
+          // Someone opened or re-flagged a chat, so every inbox's badge changes.
+          store.scheduleContactsRefresh()
+          break
         case WS_TYPE_AGENT_TRANSFER:
           this.handleAgentTransfer(message.payload)
           break
@@ -316,6 +337,9 @@ class WebSocketService {
         media_filename: payload.media_filename,
         interactive_data: payload.interactive_data,
         status: payload.status,
+        sent_by_user_id: payload.sent_by_user_id,
+        sent_by_name: payload.sent_by_name,
+        sent_by_label: payload.sent_by_label,
         wamid: payload.wamid,
         error_message: payload.error_message,
         is_reply: payload.is_reply,
@@ -331,16 +355,20 @@ class WebSocketService {
 
     // Show toast notification for incoming messages if:
     // 1. Message is incoming (from customer, not chatbot/agent)
-    // 2. Current user is assigned to this contact
+    // 2. Current user owns this contact, or nobody does: an unowned chat on a
+    //    shared number has to reach someone
     // 3. User has new_message_alerts enabled
-    // 4. User is not currently viewing this contact
-    if (payload.direction === 'incoming' && !isViewingThisContact) {
+    // 4. User isn't looking at this chat, which includes it being open behind
+    //    another window
+    const userAway = typeof document !== 'undefined'
+      && (document.visibilityState === 'hidden' || !document.hasFocus())
+    if (payload.direction === 'incoming' && (!isViewingThisContact || userAway)) {
       const authStore = useAuthStore()
       const currentUserId = authStore.user?.id
       const settings = authStore.userSettings
 
       // Check if user is assigned to this contact
-      const isAssignedToUser = payload.assigned_user_id === currentUserId
+      const isAssignedToUser = !payload.assigned_user_id || payload.assigned_user_id === currentUserId
 
       // Check if new message alerts are enabled (default to true if not set)
       const alertsEnabled = settings.new_message_alerts !== false
@@ -356,6 +384,7 @@ class WebSocketService {
         // Play notification sound and show browser notification
         playNotificationSound()
         showNotification(senderName, preview, contactId)
+        if (userAway) showDesktopNotification(senderName, preview, contactId)
       }
     }
 
@@ -667,6 +696,10 @@ class WebSocketService {
     document.removeEventListener('visibilitychange', this.onVisibilityChange)
     window.removeEventListener('online', this.onWake)
     window.removeEventListener('pageshow', this.onWake)
+  }
+
+  sendAgentTyping(contactId: string, name: string) {
+    this.send({ type: WS_TYPE_AGENT_TYPING, payload: { contact_id: contactId, name } })
   }
 
   setCurrentContact(contactId: string | null) {

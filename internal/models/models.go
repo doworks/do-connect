@@ -356,6 +356,18 @@ type Contact struct {
 	Metadata           JSONB      `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 	LastInboundAt      *time.Time `json:"last_inbound_at,omitempty"` // When customer last sent a message (for 24h window tracking)
 
+	// WhatsAppName is the name the person set in WhatsApp. ProfileName follows it
+	// until staff or an integration names the contact, which sets NameLocked.
+	WhatsAppName string `gorm:"size:255" json:"whatsapp_name"`
+	NameLocked   bool   `gorm:"default:false" json:"name_locked"`
+
+	// Worklist state, kept on the contact so the list stays one query.
+	MarkedUnread   bool       `gorm:"default:false" json:"marked_unread"`
+	LastDirection  Direction  `gorm:"size:10" json:"last_direction"`
+	LastReplyBy    string     `gorm:"size:255" json:"last_reply_by"`
+	LastSendFailed bool       `gorm:"default:false" json:"last_send_failed"`
+	WaitingSince   *time.Time `gorm:"index" json:"waiting_since,omitempty"` // Patient wrote and no staff member has replied
+
 	// Marketing opt-out (from Meta user_preferences webhook)
 	MarketingOptOut bool `gorm:"default:false" json:"marketing_opt_out"`
 
@@ -399,6 +411,9 @@ type Message struct {
 	IsReply           bool          `gorm:"default:false" json:"is_reply"`
 	ReplyToMessageID  *uuid.UUID    `gorm:"type:uuid" json:"reply_to_message_id,omitempty"`
 	SentByUserID      *uuid.UUID    `gorm:"type:uuid;index" json:"sent_by_user_id,omitempty"` // User who sent outgoing message
+	SentByLabel       string        `gorm:"size:100" json:"sent_by_label,omitempty"`          // Shown instead of a user for API sends, such as "Automatic reminder"
+	DeliveredAt       *time.Time    `json:"delivered_at,omitempty"`
+	ReadAt            *time.Time    `json:"read_at,omitempty"`
 	Metadata          JSONB         `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 
 	// Relations

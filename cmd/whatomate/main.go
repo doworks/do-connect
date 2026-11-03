@@ -646,7 +646,9 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// Messages
 	g.GET("/api/contacts/{id}/messages", app.GetMessages)
 	g.POST("/api/contacts/{id}/messages", app.SendMessage)
+	g.DELETE("/api/contacts/{id}/messages/{message_id}/held", app.CancelHeldMessage)
 	g.POST("/api/contacts/{id}/mark-read", app.MarkContactRead)
+	g.POST("/api/contacts/{id}/mark-unread", app.MarkContactUnread)
 	g.POST("/api/contacts/{id}/messages/{message_id}/reaction", app.SendReaction)
 	g.POST("/api/messages", app.SendMessage) // Legacy route
 	g.POST("/api/messages/template", app.SendTemplateMessage)

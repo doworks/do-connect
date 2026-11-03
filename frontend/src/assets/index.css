@@ -358,6 +358,58 @@
   color: rgba(17, 27, 33, 0.6);
 }
 
+/* Who sent an outgoing message */
+.chat-bubble-sender {
+  @apply inline-flex items-center gap-0.5 font-medium hover:underline;
+}
+
+.chat-bubble-sender:not([class*='text-']) {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.light .chat-bubble-sender:not([class*='text-']) {
+  color: rgba(17, 27, 33, 0.7);
+}
+
+/* Arabic text: time sits at the end of the line, on the left */
+.chat-bubble-time span {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+[dir='auto']:dir(rtl) > .chat-bubble-time {
+  float: left;
+  margin-left: 0;
+  margin-right: 8px;
+}
+
+/* Waiting for the patient to reply */
+.chat-bubble-held {
+  border: 1px dashed rgba(251, 191, 36, 0.6);
+  background: rgba(251, 191, 36, 0.08) !important;
+}
+
+.light .chat-bubble-held {
+  background: #fffbeb !important;
+  border-color: #f59e0b;
+}
+
+.chat-bubble-held .chat-bubble-time {
+  top: 0;
+  margin-bottom: 6px;
+}
+
+.chat-bubble-held-note {
+  @apply flex items-center gap-1 pt-1.5 text-[11px];
+  clear: both;
+  color: #fcd34d;
+  border-top: 1px dashed rgba(251, 191, 36, 0.35);
+}
+
+.light .chat-bubble-held-note {
+  color: #92400e;
+}
+
 /* Status icons */
 .chat-bubble-outgoing .chat-bubble-time .status-icon {
   color: rgba(255, 255, 255, 0.6);

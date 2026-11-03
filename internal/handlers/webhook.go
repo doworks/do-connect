@@ -424,13 +424,19 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 
 	updates := map[string]any{}
 
+	now := time.Now()
 	switch newStatus {
 	case models.MessageStatusSent:
 		updates["status"] = models.MessageStatusSent
 	case models.MessageStatusDelivered:
 		updates["status"] = models.MessageStatusDelivered
+		updates["delivered_at"] = now
 	case models.MessageStatusRead:
 		updates["status"] = models.MessageStatusRead
+		updates["read_at"] = now
+		if message.DeliveredAt == nil {
+			updates["delivered_at"] = now
+		}
 	case models.MessageStatusFailed:
 		updates["status"] = models.MessageStatusFailed
 		if len(errors) > 0 {
@@ -456,6 +462,10 @@ func (a *App) updateMessageStatus(whatsappMsgID, statusValue string, errors []We
 	}
 
 	a.Log.Info("Updated message status", "message_id", message.ID, "status", statusValue)
+
+	if newStatus == models.MessageStatusFailed && message.Direction == models.DirectionOutgoing {
+		a.markContactSendFailed(&message)
+	}
 
 	// Update campaign stats and recipient status if this is a campaign message
 	if message.Metadata != nil {
@@ -711,6 +721,10 @@ func (a *App) processMessageEcho(phoneNumberID string, msg IncomingTextMessage) 
 		"last_message_preview": preview,
 		"is_read":              true, // Echoes from mobile app are outgoing, so conversation is read
 		"whats_app_account":    account.Name,
+		"last_direction":       models.DirectionOutgoing,
+		"last_reply_by":        "",
+		"last_send_failed":     false,
+		"waiting_since":        nil,
 	})
 
 	// Broadcast new message via WebSocket to keep UI updated

@@ -56,6 +56,7 @@ const (
 	MessageStatusRead      MessageStatus = "read"
 	MessageStatusFailed    MessageStatus = "failed"
 	MessageStatusReceived  MessageStatus = "received"
+	MessageStatusHeld      MessageStatus = "held" // Waiting for the patient to open the 24-hour window
 )
 
 // AIProvider represents supported AI providers

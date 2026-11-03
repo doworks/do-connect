@@ -6,11 +6,29 @@ import (
 	"gorm.io/gorm"
 )
 
+// applyWhatsAppName records the name the person set in WhatsApp. A contact named
+// by staff or an integration keeps that name.
+func applyWhatsAppName(db *gorm.DB, contact *models.Contact, name string) {
+	if name == "" {
+		return
+	}
+	updates := map[string]any{}
+	if contact.WhatsAppName != name {
+		updates["whats_app_name"] = name
+	}
+	if !contact.NameLocked && contact.ProfileName != name {
+		updates["profile_name"] = name
+	}
+	if len(updates) > 0 {
+		db.Model(contact).Updates(updates)
+	}
+}
+
 // GetOrCreateContact finds or creates a contact for the given phone number.
 // Merges behaviors from both handler and worker implementations:
 //   - Normalizes phone (strips leading "+")
 //   - Tries both normalized and +prefix forms
-//   - Updates profile name if changed
+//   - Updates the WhatsApp name, and the profile name unless it's locked
 //   - Handles race conditions on create by re-fetching
 //   - Restores soft-deleted contacts if found
 //
@@ -30,10 +48,7 @@ func GetOrCreateContact(db *gorm.DB, orgID uuid.UUID, phoneNumber, profileName s
 			db.Unscoped().Model(&contact).Update("deleted_at", nil)
 			contact.DeletedAt.Valid = false
 		}
-		// Update profile name if changed
-		if profileName != "" && contact.ProfileName != profileName {
-			db.Model(&contact).Update("profile_name", profileName)
-		}
+		applyWhatsAppName(db, &contact, profileName)
 		return &contact, false, nil
 	}
 
@@ -44,9 +59,7 @@ func GetOrCreateContact(db *gorm.DB, orgID uuid.UUID, phoneNumber, profileName s
 			db.Unscoped().Model(&contact).Update("deleted_at", nil)
 			contact.DeletedAt.Valid = false
 		}
-		if profileName != "" && contact.ProfileName != profileName {
-			db.Model(&contact).Update("profile_name", profileName)
-		}
+		applyWhatsAppName(db, &contact, profileName)
 		return &contact, false, nil
 	}
 
@@ -56,6 +69,7 @@ func GetOrCreateContact(db *gorm.DB, orgID uuid.UUID, phoneNumber, profileName s
 		OrganizationID: orgID,
 		PhoneNumber:    normalizedPhone,
 		ProfileName:    profileName,
+		WhatsAppName:   profileName,
 	}
 	if err := db.Create(&contact).Error; err != nil {
 		// Race condition: another goroutine may have created the contact

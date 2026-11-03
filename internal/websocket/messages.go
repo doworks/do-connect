@@ -15,6 +15,7 @@ const (
 	TypeStatusUpdate  = "status_update"
 	TypeContactUpdate = "contact_update"
 	TypeSetContact    = "set_contact"
+	TypeAgentTyping   = "agent_typing"
 	TypePing          = "ping"
 	TypePong          = "pong"
 
@@ -36,6 +37,9 @@ const (
 	TypeConversationNoteCreated = "conversation_note_created"
 	TypeConversationNoteUpdated = "conversation_note_updated"
 	TypeConversationNoteDeleted = "conversation_note_deleted"
+
+	// A chat's unread state changed
+	TypeContactReadState = "contact_read_state"
 
 	// Call types
 	TypeCallIncoming = "call_incoming"

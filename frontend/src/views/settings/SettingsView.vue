@@ -40,6 +40,9 @@ const generalSettings = ref({
   default_timezone: 'UTC',
   date_format: 'YYYY-MM-DD',
   mask_phone_numbers: false,
+  default_country_code: '',
+  unlock_template_en: '',
+  unlock_template_ar: '',
   meta_app_id: '',
   meta_config_id: '',
   meta_app_secret: '',
@@ -98,6 +101,9 @@ onMounted(async () => {
         default_timezone: orgData.settings?.timezone || 'UTC',
         date_format: orgData.settings?.date_format || 'YYYY-MM-DD',
         mask_phone_numbers: orgData.settings?.mask_phone_numbers || false,
+        default_country_code: orgData.settings?.default_country_code || '',
+        unlock_template_en: orgData.settings?.unlock_template_en || '',
+        unlock_template_ar: orgData.settings?.unlock_template_ar || '',
         meta_app_id: orgData.settings?.meta_app_id || '',
         meta_config_id: orgData.settings?.meta_config_id || '',
         meta_app_secret: '',
@@ -136,7 +142,10 @@ async function saveGeneralSettings() {
       name: generalSettings.value.organization_name,
       timezone: generalSettings.value.default_timezone,
       date_format: generalSettings.value.date_format,
-      mask_phone_numbers: generalSettings.value.mask_phone_numbers
+      mask_phone_numbers: generalSettings.value.mask_phone_numbers,
+      default_country_code: generalSettings.value.default_country_code,
+      unlock_template_en: generalSettings.value.unlock_template_en,
+      unlock_template_ar: generalSettings.value.unlock_template_ar
     }
     if (canWriteAccounts.value) {
       payload.meta_app_id = generalSettings.value.meta_app_id
@@ -333,6 +342,25 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
                     :checked="generalSettings.mask_phone_numbers"
                     @update:checked="generalSettings.mask_phone_numbers = $event"
                   />
+                </div>
+                <Separator class="bg-white/[0.08] light:bg-gray-200" />
+                <div class="flex items-center justify-between gap-4">
+                  <div>
+                    <p class="font-medium text-white light:text-gray-900">{{ $t('settings.defaultCountryCode') }}</p>
+                    <p class="text-sm text-white/40 light:text-gray-500">{{ $t('settings.defaultCountryCodeDesc') }}</p>
+                  </div>
+                  <Input v-model="generalSettings.default_country_code" class="w-24" inputmode="numeric" placeholder="973" />
+                </div>
+                <Separator class="bg-white/[0.08] light:bg-gray-200" />
+                <div class="space-y-2">
+                  <div>
+                    <p class="font-medium text-white light:text-gray-900">{{ $t('settings.unlockTemplates') }}</p>
+                    <p class="text-sm text-white/40 light:text-gray-500">{{ $t('settings.unlockTemplatesDesc') }}</p>
+                  </div>
+                  <div class="grid grid-cols-2 gap-3">
+                    <Input v-model="generalSettings.unlock_template_en" :aria-label="$t('settings.unlockTemplateEn')" :placeholder="$t('settings.unlockTemplateEn')" />
+                    <Input v-model="generalSettings.unlock_template_ar" :aria-label="$t('settings.unlockTemplateAr')" :placeholder="$t('settings.unlockTemplateAr')" />
+                  </div>
                 </div>
                 <div class="flex justify-end">
                   <Button variant="outline" size="sm" class="bg-white/[0.04] border-white/[0.1] text-white/70 hover:bg-white/[0.08] hover:text-white light:bg-white light:border-gray-200 light:text-gray-700 light:hover:bg-gray-50" @click="saveGeneralSettings" :disabled="isSubmitting">

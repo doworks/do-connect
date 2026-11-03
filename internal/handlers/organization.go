@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,13 +26,16 @@ func generalSettingsSnapshot(name string, settings models.JSONB) map[string]any 
 		}
 	}
 	return map[string]any{
-		"name":                name,
-		"timezone":            settings["timezone"],
-		"date_format":         settings["date_format"],
-		"mask_phone_numbers":  settings["mask_phone_numbers"],
-		"meta_app_id":         settings["meta_app_id"],
-		"meta_config_id":      settings["meta_config_id"],
-		"has_meta_app_secret": hasSecret,
+		"name":                 name,
+		"timezone":             settings["timezone"],
+		"date_format":          settings["date_format"],
+		"mask_phone_numbers":   settings["mask_phone_numbers"],
+		"default_country_code": settings["default_country_code"],
+		"unlock_template_en":   settings["unlock_template_en"],
+		"unlock_template_ar":   settings["unlock_template_ar"],
+		"meta_app_id":          settings["meta_app_id"],
+		"meta_config_id":       settings["meta_config_id"],
+		"has_meta_app_secret":  hasSecret,
 	}
 }
 
@@ -50,6 +54,9 @@ func callingSettingsSnapshot(settings models.JSONB) map[string]any {
 // OrganizationSettings represents the settings structure
 type OrganizationSettings struct {
 	MaskPhoneNumbers    bool   `json:"mask_phone_numbers"`
+	DefaultCountryCode  string `json:"default_country_code"`
+	UnlockTemplateEN    string `json:"unlock_template_en"`
+	UnlockTemplateAR    string `json:"unlock_template_ar"`
 	Timezone            string `json:"timezone"`
 	DateFormat          string `json:"date_format"`
 	CallingEnabled      bool   `json:"calling_enabled"`
@@ -89,6 +96,15 @@ func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
 	if org.Settings != nil {
 		if v, ok := org.Settings["mask_phone_numbers"].(bool); ok {
 			settings.MaskPhoneNumbers = v
+		}
+		if v, ok := org.Settings["default_country_code"].(string); ok {
+			settings.DefaultCountryCode = v
+		}
+		if v, ok := org.Settings["unlock_template_en"].(string); ok {
+			settings.UnlockTemplateEN = v
+		}
+		if v, ok := org.Settings["unlock_template_ar"].(string); ok {
+			settings.UnlockTemplateAR = v
 		}
 		if v, ok := org.Settings["timezone"].(string); ok && v != "" {
 			settings.Timezone = v
@@ -137,6 +153,9 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 
 	var req struct {
 		MaskPhoneNumbers    *bool   `json:"mask_phone_numbers"`
+		DefaultCountryCode  *string `json:"default_country_code"`
+		UnlockTemplateEN    *string `json:"unlock_template_en"`
+		UnlockTemplateAR    *string `json:"unlock_template_ar"`
 		Timezone            *string `json:"timezone"`
 		DateFormat          *string `json:"date_format"`
 		Name                *string `json:"name"`
@@ -172,7 +191,7 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 	oldCalling := callingSettingsSnapshot(org.Settings)
 
 	// Track which tabs received updates so we only audit the relevant ones.
-	generalTouched := req.MaskPhoneNumbers != nil || req.Timezone != nil || req.DateFormat != nil || (req.Name != nil && *req.Name != "") || metaAppCredsTouched
+	generalTouched := req.MaskPhoneNumbers != nil || req.DefaultCountryCode != nil || req.UnlockTemplateEN != nil || req.UnlockTemplateAR != nil || req.Timezone != nil || req.DateFormat != nil || (req.Name != nil && *req.Name != "") || metaAppCredsTouched
 	callingTouched := req.CallingEnabled != nil || req.MaxCallDuration != nil || req.TransferTimeoutSecs != nil || req.HoldMusicFile != nil || req.RingbackFile != nil
 
 	// Update settings
@@ -182,6 +201,15 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 
 	if req.MaskPhoneNumbers != nil {
 		org.Settings["mask_phone_numbers"] = *req.MaskPhoneNumbers
+	}
+	if req.DefaultCountryCode != nil {
+		org.Settings["default_country_code"] = utils.NormalizePhone(*req.DefaultCountryCode, "")
+	}
+	if req.UnlockTemplateEN != nil {
+		org.Settings["unlock_template_en"] = strings.TrimSpace(*req.UnlockTemplateEN)
+	}
+	if req.UnlockTemplateAR != nil {
+		org.Settings["unlock_template_ar"] = strings.TrimSpace(*req.UnlockTemplateAR)
 	}
 	if req.Timezone != nil {
 		org.Settings["timezone"] = *req.Timezone
@@ -734,4 +762,14 @@ func (a *App) UpdateOrganizationMemberRole(r *fastglue.Request) error {
 		map[string]any{"role_id": previousRoleID}, map[string]any{"role_id": req.RoleID})
 
 	return r.SendEnvelope(map[string]string{"message": "Member role updated successfully"})
+}
+
+// defaultCountryCode is what numbers typed without a country code get.
+func (a *App) defaultCountryCode(orgID uuid.UUID) string {
+	var org models.Organization
+	if err := a.DB.Select("settings").Where("id = ?", orgID).First(&org).Error; err != nil || org.Settings == nil {
+		return ""
+	}
+	code, _ := org.Settings["default_country_code"].(string)
+	return code
 }

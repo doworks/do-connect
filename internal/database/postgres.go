@@ -243,6 +243,13 @@ func getIndexes() []string {
 		// Partial index for per-contact unread counts in the contact list
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_unread ON messages(contact_id) WHERE direction = 'incoming' AND status <> 'read' AND deleted_at IS NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_org_phone ON contacts(organization_id, phone_number)`,
+		// Templates sent through an API key before labels existed carry the key owner's name, though they
+		// came from an integration. Runs only until the first label exists, so later staff sends are never touched.
+		`UPDATE messages SET sent_by_label = 'Automatic' WHERE message_type = 'template' AND sent_by_user_id IN (SELECT user_id FROM api_keys) AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.sent_by_label <> '')`,
+		// Names Frappe already set stay set. Its contacts carry a language mark or the WhatsApp name in metadata.
+		`UPDATE contacts SET name_locked = true, whats_app_name = COALESCE(NULLIF(whats_app_name, ''), metadata->>'whatsapp_name', '') WHERE name_locked = false AND (profile_name LIKE 'AR · %' OR profile_name LIKE 'EN · %' OR metadata ? 'whatsapp_name')`,
+		// Fill the worklist columns for chats from before they existed. Rows get a direction once, so this is idempotent.
+		`UPDATE contacts c SET last_direction = m.direction, waiting_since = CASE WHEN m.direction = 'incoming' AND m.status <> 'read' THEN m.created_at END FROM (SELECT DISTINCT ON (contact_id) contact_id, direction, status, created_at FROM messages WHERE deleted_at IS NULL ORDER BY contact_id, created_at DESC) m WHERE m.contact_id = c.id AND (c.last_direction IS NULL OR c.last_direction = '')`,
 		`CREATE INDEX IF NOT EXISTS idx_contacts_assigned_read ON contacts(assigned_user_id, is_read)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_phone_status ON chatbot_sessions(organization_id, phone_number, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_keyword_rules_priority ON keyword_rules(organization_id, is_enabled, priority DESC)`,

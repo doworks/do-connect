@@ -1,5 +1,7 @@
 <a href="https://zerodha.tech"><img src="https://zerodha.tech/static/images/github-badge.svg" align="right" alt="Zerodha Tech Badge" /></a>
 
+> **Modified version.** This is a clinic build of [Whatomate](https://github.com/shridarpatil/whatomate), changed from November 2026 onward. It adds staff names on messages, worklist tabs, mark as unread, messages held until a patient replies, and fixes for shared inboxes. It stays under the AGPL-3.0 license. The original project's documentation below still applies.
+
 # Whatomate
 
 Modern, open-source WhatsApp Business Platform. Single binary app.

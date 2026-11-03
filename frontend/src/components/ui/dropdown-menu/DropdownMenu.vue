@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { DropdownMenuRoot } from 'reka-ui'
 
-const props = defineProps<{
+// Default to undefined: a boolean prop otherwise defaults to false, which holds
+// the menu shut because reka-ui treats any defined value as controlled.
+withDefaults(defineProps<{
   open?: boolean
-}>()
+}>(), { open: undefined })
 
 const emit = defineEmits<{
   'update:open': [value: boolean]

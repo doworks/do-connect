@@ -16,6 +16,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
+	"gorm.io/gorm"
 )
 
 func redactURLForLog(raw string) string {
@@ -1600,18 +1601,27 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		preview = "[" + msgType + "]"
 	}
 
-	a.DB.Model(contact).Updates(map[string]any{
+	contactUpdates := map[string]any{
 		"last_message_at":      now,
 		"last_message_preview": preview,
 		"is_read":              false,
 		"whats_app_account":    account.Name,
 		"last_inbound_at":      now,
-	})
+		"last_direction":       models.DirectionIncoming,
+		"last_send_failed":     false,
+	}
+	// Messages the chatbot already handled arrive read, and aren't waiting on staff.
+	if message.Status != models.MessageStatusRead {
+		contactUpdates["waiting_since"] = gorm.Expr("COALESCE(waiting_since, ?)", now)
+	}
+	a.DB.Model(contact).Updates(contactUpdates)
 
 	a.Log.Info("Saved incoming message", "message_id", message.ID, "contact_id", contact.ID, "media_url", message.MediaURL)
 
 	// Broadcast new message via WebSocket
 	a.broadcastNewMessage(account.OrganizationID, &message, contact)
+
+	a.releaseHeldMessages(account, contact, &message)
 
 	// Dispatch webhook for incoming message
 	a.DispatchWebhook(account.OrganizationID, models.WebhookEventMessageIncoming, MessageEventData{

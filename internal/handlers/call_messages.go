@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/websocket"
+	"gorm.io/gorm"
 )
 
 // missedCallPreview is what the contact list shows for a missed call.
@@ -112,6 +113,8 @@ func (a *App) recordMissedCallMessage(callLog *models.CallLog, contact *models.C
 		"last_message_at":      now,
 		"last_message_preview": missedCallPreview,
 		"is_read":              false,
+		"last_direction":       models.DirectionIncoming,
+		"waiting_since":        gorm.Expr("COALESCE(waiting_since, ?)", now),
 	})
 	contact.IsRead = false
 	contact.LastMessageAt = &now

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/templateutil"
 	"github.com/shridarpatil/whatomate/internal/utils"
@@ -91,6 +92,14 @@ type MessageSendOptions struct {
 	// SentByUserID sets the user who sent the message (for agent messages)
 	SentByUserID *uuid.UUID
 
+	// SentByLabel names the sender on API sends, where SentByUserID is only the
+	// API key's owner.
+	SentByLabel string
+
+	// ExistingMessage sends a message already saved, such as a held one, instead
+	// of creating a new row.
+	ExistingMessage *models.Message
+
 	// Async if true, sends in background goroutine and returns immediately
 	// Message is persisted before send, status updated after
 	Async bool
@@ -99,6 +108,34 @@ type MessageSendOptions struct {
 	// successful send. Used for chatbot replies so a bot-handled exchange
 	// doesn't leave an "unread" badge in the agent's contact list.
 	MarkIncomingRead bool
+}
+
+// setSender records who is sending. A person is named from their login. An API
+// key can say who to show, because the key's owner usually didn't send it; other
+// callers can't, so staff can't send under someone else's name.
+func (a *App) setSender(r *fastglue.Request, opts *MessageSendOptions, userID uuid.UUID, sentBy string) {
+	opts.SentByUserID = &userID
+	viaKey, _ := r.RequestCtx.UserValue(middleware.ContextKeyViaAPIKey).(bool)
+	if !viaKey {
+		return
+	}
+	opts.SentByLabel = strings.TrimSpace(sentBy)
+	if opts.SentByLabel == "" {
+		opts.SentByLabel = "Automatic"
+	}
+	if len(opts.SentByLabel) > 100 {
+		opts.SentByLabel = opts.SentByLabel[:100]
+	}
+}
+
+// senderUser loads just a sender's name. Staff who have left keep their name on
+// old messages, and nothing else about them goes to the client.
+func (a *App) senderUser(userID uuid.UUID) *models.User {
+	var user models.User
+	if err := a.DB.Unscoped().Select("id", "full_name").Where("id = ?", userID).First(&user).Error; err != nil {
+		return nil
+	}
+	return &user
 }
 
 // DefaultSendOptions returns options suitable for agent UI sends
@@ -146,12 +183,15 @@ func SLASendOptions() MessageSendOptions {
 // It handles: text, media (image/video/audio/document), interactive (buttons/list/cta_url), and template messages.
 func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageRequest, opts MessageSendOptions) (*models.Message, error) {
 	// 1. Create message record
-	msg := a.createOutgoingMessage(req, opts)
+	msg := opts.ExistingMessage
+	if msg == nil {
+		msg = a.createOutgoingMessage(req, opts)
 
-	// Save to database
-	if err := a.DB.Create(msg).Error; err != nil {
-		a.Log.Error("Failed to create message", "error", err)
-		return nil, fmt.Errorf("failed to create message: %w", err)
+		// Save to database
+		if err := a.DB.Create(msg).Error; err != nil {
+			a.Log.Error("Failed to create message", "error", err)
+			return nil, fmt.Errorf("failed to create message: %w", err)
+		}
 	}
 
 	// 2. Define the send function based on message type
@@ -233,6 +273,10 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 		}
 	}
 
+	if msg.SentByLabel == "" && msg.SentByUserID != nil {
+		msg.SentByUser = a.senderUser(*msg.SentByUserID)
+	}
+
 	// 3. Execute send (async or sync)
 	if opts.Async {
 		a.wg.Add(1)
@@ -250,7 +294,7 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	}
 
 	// 4. Immediate actions (before send completes for async)
-	if opts.BroadcastWebSocket {
+	if opts.BroadcastWebSocket && opts.ExistingMessage == nil {
 		a.broadcastNewMessage(req.Account.OrganizationID, msg, req.Contact)
 	}
 
@@ -261,6 +305,7 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 	// Update contact's last message
 	preview := a.getMessagePreview(req)
 	a.updateContactLastMessage(req.Contact, preview)
+	a.noteOutgoingOnContact(req.Contact, msg, opts.ExistingMessage == nil)
 
 	return msg, nil
 }
@@ -285,6 +330,7 @@ func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSend
 		MessageType:     req.Type,
 		Status:          models.MessageStatusPending,
 		SentByUserID:    opts.SentByUserID,
+		SentByLabel:     opts.SentByLabel,
 	}
 
 	// Set content based on message type
@@ -436,6 +482,7 @@ func (a *App) finalizeMessageSend(msg *models.Message, req OutgoingMessageReques
 			"error_message": errMsg,
 		})
 		a.Log.Error("Failed to send message", "error", err, "message_id", msg.ID, "type", msg.MessageType)
+		a.markContactSendFailed(msg)
 
 		// Broadcast failure status via WebSocket so frontend updates immediately
 		if opts.BroadcastWebSocket && a.WSHub != nil {
@@ -502,6 +549,7 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 	payload := map[string]any{
 		"id":               msg.ID.String(),
 		"contact_id":       contact.ID.String(),
+		"sent_by_label":    msg.SentByLabel,
 		"assigned_user_id": assignedUserIDStr,
 		"profile_name":     profileName,
 		"direction":        msg.Direction,
@@ -516,6 +564,11 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 		"created_at":       msg.CreatedAt,
 		"updated_at":       msg.UpdatedAt,
 		"is_reply":         msg.IsReply,
+	}
+
+	if msg.SentByUser != nil {
+		payload["sent_by_name"] = msg.SentByUser.FullName
+		payload["sent_by_user_id"] = msg.SentByUser.ID.String()
 	}
 
 	// Add interactive data
@@ -583,6 +636,38 @@ func (a *App) dispatchMessageSentWebhook(account *models.WhatsAppAccount, contac
 	})
 }
 
+// noteOutgoingOnContact records who replied last. Only a staff reply ends the
+// patient's wait: a reminder going out doesn't answer their question, and a held
+// message written earlier doesn't answer what they've just asked.
+func (a *App) noteOutgoingOnContact(contact *models.Contact, msg *models.Message, endsWait bool) {
+	updates := map[string]any{
+		"last_direction":   models.DirectionOutgoing,
+		"last_send_failed": false,
+	}
+	switch {
+	case msg.SentByLabel != "":
+		updates["last_reply_by"] = msg.SentByLabel
+	case msg.SentByUser != nil:
+		updates["last_reply_by"] = msg.SentByUser.FullName
+		if endsWait {
+			updates["waiting_since"] = nil
+		}
+	}
+	a.DB.Model(contact).Updates(updates)
+}
+
+// markContactSendFailed shows the failure in the chat list, unless something
+// newer has gone out since.
+func (a *App) markContactSendFailed(msg *models.Message) {
+	var newer int64
+	a.DB.Model(&models.Message{}).
+		Where("contact_id = ? AND direction = ? AND created_at > ?", msg.ContactID, models.DirectionOutgoing, msg.CreatedAt).
+		Count(&newer)
+	if newer == 0 {
+		a.DB.Model(&models.Contact{}).Where("id = ?", msg.ContactID).Update("last_send_failed", true)
+	}
+}
+
 // updateContactLastMessage updates contact's last_message_at and preview
 func (a *App) updateContactLastMessage(contact *models.Contact, preview string) {
 	a.DB.Model(contact).Updates(map[string]any{
@@ -639,6 +724,7 @@ type SendTemplateMessageRequest struct {
 	TemplateID     string            `json:"template_id"`     // Alternative: template UUID
 	TemplateParams map[string]string `json:"template_params"` // Named or positional params
 	ButtonParams   map[string]string `json:"button_params"`   // Button index -> dynamic URL param value
+	SentBy         string            `json:"sent_by"`         // API keys only: who to show as the sender
 	AccountName    string            `json:"account_name"`    // Optional: specific WhatsApp account
 
 	// Header media for templates with IMAGE/VIDEO/DOCUMENT headers.
@@ -691,6 +777,9 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		}
 		if v := form.Value["account_name"]; len(v) > 0 {
 			req.AccountName = v[0]
+		}
+		if v := form.Value["sent_by"]; len(v) > 0 {
+			req.SentBy = v[0]
 		}
 		// Parse template_params from JSON string
 		if v := form.Value["template_params"]; len(v) > 0 && v[0] != "" {
@@ -786,7 +875,10 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		contact = c
 	} else {
 		// Find or create contact from phone number
-		phoneNumber := req.PhoneNumber
+		phoneNumber := utils.NormalizePhone(req.PhoneNumber, a.defaultCountryCode(orgID))
+		if phoneNumber == "" {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "A valid phone_number is required", nil, "")
+		}
 		var c models.Contact
 		err := a.DB.Where("phone_number = ? AND organization_id = ?", phoneNumber, orgID).First(&c).Error
 		if err != nil {
@@ -972,7 +1064,7 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 	}
 
 	opts := DefaultSendOptions()
-	opts.SentByUserID = &userID
+	a.setSender(r, &opts, userID, req.SentBy)
 
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)
@@ -998,5 +1090,6 @@ func (a *App) SendTemplateMessage(r *fastglue.Request) error {
 		CreatedAt:       message.CreatedAt,
 		UpdatedAt:       message.UpdatedAt,
 	}
+	applySenderFields(&response, message)
 	return r.SendEnvelope(response)
 }

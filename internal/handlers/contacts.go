@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/utils"
+	"github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -36,6 +38,13 @@ type ContactResponse struct {
 	LastMessagePreview string     `json:"last_message_preview"`
 	UnreadCount        int        `json:"unread_count"`
 	AssignedUserID     *uuid.UUID `json:"assigned_user_id,omitempty"`
+	AssignedUserName   string     `json:"assigned_user_name,omitempty"`
+	WhatsAppName       string     `json:"whatsapp_name,omitempty"`
+	MarkedUnread       bool       `json:"marked_unread"`
+	LastDirection      string     `json:"last_message_direction,omitempty"`
+	LastReplyBy        string     `json:"last_reply_by,omitempty"`
+	LastSendFailed     bool       `json:"last_send_failed"`
+	WaitingSince       *time.Time `json:"waiting_since,omitempty"`
 	WhatsAppAccount    string     `json:"whatsapp_account,omitempty"`
 	LastInboundAt      *time.Time `json:"last_inbound_at,omitempty"`
 	ServiceWindowOpen  bool       `json:"service_window_open"`
@@ -62,6 +71,12 @@ type MessageResponse struct {
 	ReplyToMessageID *string              `json:"reply_to_message_id,omitempty"`
 	ReplyToMessage   *ReplyPreview        `json:"reply_to_message,omitempty"`
 	Reactions        []ReactionInfo       `json:"reactions,omitempty"`
+	SentByUserID     *uuid.UUID           `json:"sent_by_user_id,omitempty"`
+	SentByName       string               `json:"sent_by_name,omitempty"`
+	SentByLabel      string               `json:"sent_by_label,omitempty"`
+	TemplateName     string               `json:"template_name,omitempty"`
+	DeliveredAt      *time.Time           `json:"delivered_at,omitempty"`
+	ReadAt           *time.Time           `json:"read_at,omitempty"`
 	WhatsAppAccount  string               `json:"whatsapp_account,omitempty"`
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
@@ -101,6 +116,9 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	// Users without contacts:read permission can only see contacts assigned to them
 	// or contacts with an active chat transfer to them
 	query = a.scopeAssignedContact(query, userID, orgID)
+
+	filterCounts := a.contactFilterCounts(query.Session(&gorm.Session{}), userID)
+	query = applyContactFilter(query, string(r.RequestCtx.QueryArgs().Peek("filter")), userID)
 
 	if search != "" {
 		// Limit search string length to prevent abuse
@@ -148,6 +166,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 	shouldMask := a.ShouldMaskPhoneNumbers(orgID)
 
 	unreadCounts := a.unreadCountsByContact(contacts)
+	ownerNames := a.assigneeNames(contacts)
 
 	// Convert to response format
 	response := make([]ContactResponse, len(contacts))
@@ -180,7 +199,7 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			Metadata:           c.Metadata,
 			LastMessageAt:      c.LastMessageAt,
 			LastMessagePreview: c.LastMessagePreview,
-			UnreadCount:        int(unreadCounts[c.ID]),
+			UnreadCount:        unreadForDisplay(unreadCounts[c.ID], &c),
 			AssignedUserID:     c.AssignedUserID,
 			WhatsAppAccount:    c.WhatsAppAccount,
 			LastInboundAt:      c.LastInboundAt,
@@ -189,9 +208,95 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			CreatedAt:          c.CreatedAt,
 			UpdatedAt:          c.UpdatedAt,
 		}
+		applyWorklistFields(&response[i], &c, ownerNames)
 	}
 
-	return r.SendEnvelope(listEnvelope("contacts", response, total, pg))
+	envelope := listEnvelope("contacts", response, total, pg)
+	envelope["filter_counts"] = filterCounts
+	return r.SendEnvelope(envelope)
+}
+
+// applyContactFilter narrows the chat list to one worklist tab.
+func applyContactFilter(query *gorm.DB, filter string, userID uuid.UUID) *gorm.DB {
+	switch filter {
+	case "unread":
+		return query.Where("marked_unread = true OR EXISTS (SELECT 1 FROM messages m WHERE m.contact_id = contacts.id AND m.direction = 'incoming' AND m.status <> 'read' AND m.deleted_at IS NULL)")
+	case "waiting":
+		return query.Where("waiting_since IS NOT NULL")
+	case "mine":
+		return query.Where("assigned_user_id = ?", userID)
+	case "unassigned":
+		return query.Where("assigned_user_id IS NULL")
+	}
+	return query
+}
+
+// contactFilterCounts returns how many chats each worklist tab holds.
+func (a *App) contactFilterCounts(base *gorm.DB, userID uuid.UUID) map[string]int64 {
+	counts := map[string]int64{}
+	for _, filter := range []string{"unread", "waiting", "mine", "unassigned"} {
+		var count int64
+		applyContactFilter(base.Session(&gorm.Session{}), filter, userID).Model(&models.Contact{}).Count(&count)
+		counts[filter] = count
+	}
+	return counts
+}
+
+// unreadForDisplay counts a chat marked unread by hand as at least one.
+func unreadForDisplay(count int64, contact *models.Contact) int {
+	if contact.MarkedUnread && count == 0 {
+		return 1
+	}
+	return int(count)
+}
+
+// assigneeNames returns the names of the staff who own a page of contacts.
+func (a *App) assigneeNames(contacts []models.Contact) map[uuid.UUID]string {
+	ids := make([]uuid.UUID, 0, len(contacts))
+	for i := range contacts {
+		if contacts[i].AssignedUserID != nil {
+			ids = append(ids, *contacts[i].AssignedUserID)
+		}
+	}
+	names := make(map[uuid.UUID]string, len(ids))
+	if len(ids) == 0 {
+		return names
+	}
+	var users []models.User
+	a.DB.Unscoped().Select("id", "full_name").Where("id IN ?", ids).Find(&users)
+	for i := range users {
+		names[users[i].ID] = users[i].FullName
+	}
+	return names
+}
+
+func applyWorklistFields(response *ContactResponse, contact *models.Contact, ownerNames map[uuid.UUID]string) {
+	response.WhatsAppName = contact.WhatsAppName
+	response.MarkedUnread = contact.MarkedUnread
+	response.LastDirection = string(contact.LastDirection)
+	response.LastReplyBy = contact.LastReplyBy
+	response.LastSendFailed = contact.LastSendFailed
+	response.WaitingSince = contact.WaitingSince
+	if contact.AssignedUserID != nil {
+		response.AssignedUserName = ownerNames[*contact.AssignedUserID]
+	}
+}
+
+// applySenderFields adds who sent a message and when it arrived to a response.
+func applySenderFields(response *MessageResponse, message *models.Message) {
+	response.SentByUserID = message.SentByUserID
+	response.SentByLabel = message.SentByLabel
+	response.TemplateName = message.TemplateName
+	response.DeliveredAt = message.DeliveredAt
+	response.ReadAt = message.ReadAt
+	if message.SentByUser != nil {
+		response.SentByName = message.SentByUser.FullName
+	}
+}
+
+// preloadSender loads only the sender's name, including staff who have left.
+func preloadSender(db *gorm.DB) *gorm.DB {
+	return db.Unscoped().Select("id", "full_name")
 }
 
 // unreadCountsByContact returns unread incoming message counts for a page of
@@ -345,7 +450,7 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 		}
 		// For loading older messages, order DESC and limit, then reverse
 		var messages []models.Message
-		if err := msgQuery.Preload("ReplyToMessage").Order("created_at DESC").Limit(limit).Find(&messages).Error; err != nil {
+		if err := msgQuery.Preload("ReplyToMessage").Preload("SentByUser", preloadSender).Order("created_at DESC").Limit(limit).Find(&messages).Error; err != nil {
 			a.Log.Error("Failed to list messages", "error", err)
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list messages", nil, "")
 		}
@@ -381,13 +486,16 @@ func (a *App) GetMessages(r *fastglue.Request) error {
 	}
 
 	var messages []models.Message
-	if err := msgQuery.Preload("ReplyToMessage").Order("created_at ASC").Offset(offset).Limit(queryLimit).Find(&messages).Error; err != nil {
+	if err := msgQuery.Preload("ReplyToMessage").Preload("SentByUser", preloadSender).Order("created_at ASC").Offset(offset).Limit(queryLimit).Find(&messages).Error; err != nil {
 		a.Log.Error("Failed to list messages", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to list messages", nil, "")
 	}
 
-	// Mark messages as read
-	a.markMessagesAsRead(orgID, contactID, &contact)
+	// Opening a chat reads it. Integrations looking something up don't.
+	viaKey, _ := r.RequestCtx.UserValue(middleware.ContextKeyViaAPIKey).(bool)
+	if !viaKey && string(r.RequestCtx.QueryArgs().Peek("mark_read")) != "false" {
+		a.markMessagesAsRead(orgID, contactID, &contact)
+	}
 
 	response := a.buildMessagesResponse(messages)
 	return r.SendEnvelope(map[string]any{
@@ -428,6 +536,7 @@ func (a *App) buildMessagesResponse(messages []models.Message) []MessageResponse
 			CreatedAt:       m.CreatedAt,
 			UpdatedAt:       m.UpdatedAt,
 		}
+		applySenderFields(&msgResp, &m)
 
 		if m.IsReply && m.ReplyToMessageID != nil {
 			replyToID := m.ReplyToMessageID.String()
@@ -490,6 +599,40 @@ func (a *App) MarkContactRead(r *fastglue.Request) error {
 	return r.SendEnvelope(map[string]any{"status": "ok"})
 }
 
+// MarkContactUnread puts a chat back on everyone's unread list until someone opens it.
+func (a *App) MarkContactUnread(r *fastglue.Request) error {
+	orgID, userID, err := a.getOrgAndUserID(r)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	contactID, err := parsePathUUID(r, "id", "contact")
+	if err != nil {
+		return nil
+	}
+
+	var contact models.Contact
+	query := a.DB.Where("id = ? AND organization_id = ?", contactID, orgID)
+	query = a.scopeAssignedContact(query, userID, orgID)
+	if err := query.First(&contact).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
+	}
+
+	a.DB.Model(&contact).Updates(map[string]any{"marked_unread": true, "is_read": false})
+	a.broadcastReadState(orgID, contactID)
+	return r.SendEnvelope(map[string]any{"status": "ok"})
+}
+
+// broadcastReadState tells every open inbox that a chat's badge changed.
+func (a *App) broadcastReadState(orgID, contactID uuid.UUID) {
+	if a.WSHub == nil {
+		return
+	}
+	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
+		Type:    websocket.TypeContactReadState,
+		Payload: map[string]any{"contact_id": contactID.String()},
+	})
+}
+
 // markMessagesAsRead marks messages as read and sends read receipts
 func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *models.Contact) {
 	var unreadMessages []models.Message
@@ -500,7 +643,11 @@ func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *
 		Where("contact_id = ? AND direction = ?", contactID, models.DirectionIncoming).
 		Update("status", models.MessageStatusRead)
 
-	a.DB.Model(contact).Update("is_read", true)
+	wasUnread := len(unreadMessages) > 0 || contact.MarkedUnread
+	a.DB.Model(contact).Updates(map[string]any{"is_read": true, "marked_unread": false})
+	if wasUnread {
+		a.broadcastReadState(orgID, contactID)
+	}
 
 	if len(unreadMessages) > 0 && contact.WhatsAppAccount != "" {
 		if account, err := a.resolveWhatsAppAccount(orgID, contact.WhatsAppAccount); err == nil {
@@ -606,6 +753,15 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Failed to resolve WhatsApp account", nil, "")
 	}
 
+	// Staff can type at any time. With an unlock template set up, a message outside
+	// the 24-hour window waits for the patient.
+	viaKey, _ := r.RequestCtx.UserValue(middleware.ContextKeyViaAPIKey).(bool)
+	if req.Type == models.MessageTypeText && !viaKey && !serviceWindowOpen(&contact) {
+		if template := a.unlockTemplate(&contact, account); template != nil {
+			return a.holdTextMessage(r, &contact, account, template, req.Content.Body, userID)
+		}
+	}
+
 	// Handle reply context
 	var replyToMessage *models.Message
 	if req.ReplyToMessageID != "" {
@@ -694,7 +850,7 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 	}
 
 	opts := DefaultSendOptions()
-	opts.SentByUserID = &userID
+	a.setSender(r, &opts, userID, "")
 
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)
@@ -717,6 +873,7 @@ func (a *App) SendMessage(r *fastglue.Request) error {
 		CreatedAt:       message.CreatedAt,
 		UpdatedAt:       message.UpdatedAt,
 	}
+	applySenderFields(&response, message)
 
 	// Add reply context to response
 	if message.IsReply && message.ReplyToMessageID != nil && replyToMessage != nil {
@@ -879,7 +1036,7 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 	}
 
 	opts := DefaultSendOptions()
-	opts.SentByUserID = &userID
+	a.setSender(r, &opts, userID, "")
 
 	ctx := context.Background()
 	message, err := a.SendOutgoingMessage(ctx, msgReq, opts)
@@ -902,6 +1059,7 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 		CreatedAt:       message.CreatedAt,
 		UpdatedAt:       message.UpdatedAt,
 	}
+	applySenderFields(&response, message)
 
 	return r.SendEnvelope(response)
 }
@@ -1138,11 +1296,6 @@ func (a *App) AssignContact(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
 
-	// Only users with write permission can assign contacts
-	if !a.HasPermission(userID, models.ResourceContacts, models.ActionWrite, orgID) {
-		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have permission to assign contacts", nil, "")
-	}
-
 	contactID, err := parsePathUUID(r, "id", "contact")
 	if err != nil {
 		return nil
@@ -1159,6 +1312,12 @@ func (a *App) AssignContact(r *fastglue.Request) error {
 		return nil
 	}
 
+	// Assigning takes write permission, except staff taking a chat nobody owns.
+	claiming := req.UserID != nil && *req.UserID == userID && contact.AssignedUserID == nil
+	if !claiming && !a.HasPermission(userID, models.ResourceContacts, models.ActionWrite, orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "You do not have permission to assign contacts", nil, "")
+	}
+
 	// If assigning to a user, verify they exist in the same org
 	if req.UserID != nil {
 		var user models.User
@@ -1172,6 +1331,8 @@ func (a *App) AssignContact(r *fastglue.Request) error {
 		a.Log.Error("Failed to assign contact", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to assign contact", nil, "")
 	}
+
+	a.broadcastReadState(orgID, contactID)
 
 	return r.SendEnvelope(map[string]any{
 		"message":          "Contact assigned successfully",
@@ -1349,6 +1510,7 @@ func (a *App) UpdateContactTags(r *fastglue.Request) error {
 type CreateContactRequest struct {
 	PhoneNumber     string         `json:"phone_number"`
 	ProfileName     string         `json:"profile_name"`
+	OpenExisting    bool           `json:"open_existing"` // Return the contact if the number already has one
 	WhatsAppAccount string         `json:"whatsapp_account"`
 	Tags            []string       `json:"tags"`
 	Metadata        map[string]any `json:"metadata"`
@@ -1375,10 +1537,9 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "phone_number is required", nil, "")
 	}
 
-	// Normalize phone number
-	normalizedPhone := req.PhoneNumber
-	if len(normalizedPhone) > 0 && normalizedPhone[0] == '+' {
-		normalizedPhone = normalizedPhone[1:]
+	normalizedPhone := utils.NormalizePhone(req.PhoneNumber, a.defaultCountryCode(orgID))
+	if normalizedPhone == "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "A valid phone_number is required", nil, "")
 	}
 
 	// Check if contact exists (including soft-deleted)
@@ -1393,6 +1554,7 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 			updates := map[string]any{}
 			if req.ProfileName != "" {
 				updates["profile_name"] = req.ProfileName
+				updates["name_locked"] = true
 			}
 			if req.WhatsAppAccount != "" {
 				updates["whats_app_account"] = req.WhatsAppAccount
@@ -1414,6 +1576,9 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 			a.DB.First(&existingContact, existingContact.ID)
 			return r.SendEnvelope(a.buildContactResponse(&existingContact, orgID))
 		}
+		if req.OpenExisting {
+			return r.SendEnvelope(a.buildContactResponse(&existingContact, orgID))
+		}
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Contact with this phone number already exists", nil, "")
 	}
 
@@ -1423,6 +1588,7 @@ func (a *App) CreateContact(r *fastglue.Request) error {
 		OrganizationID:  orgID,
 		PhoneNumber:     normalizedPhone,
 		ProfileName:     req.ProfileName,
+		NameLocked:      req.ProfileName != "",
 		WhatsAppAccount: req.WhatsAppAccount,
 	}
 
@@ -1495,6 +1661,7 @@ func (a *App) UpdateContact(r *fastglue.Request) error {
 
 	if req.ProfileName != nil {
 		updates["profile_name"] = *req.ProfileName
+		updates["name_locked"] = *req.ProfileName != ""
 	}
 	if req.WhatsAppAccount != nil {
 		updates["whats_app_account"] = *req.WhatsAppAccount
@@ -1602,7 +1769,7 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 	// 24-hour service window: open if customer messaged within the last 24 hours.
 	serviceWindowOpen := contact.LastInboundAt != nil && time.Since(*contact.LastInboundAt) < 24*time.Hour
 
-	return ContactResponse{
+	response := ContactResponse{
 		ID:                 contact.ID,
 		PhoneNumber:        phoneNumber,
 		Name:               profileName,
@@ -1612,7 +1779,7 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		Metadata:           contact.Metadata,
 		LastMessageAt:      contact.LastMessageAt,
 		LastMessagePreview: contact.LastMessagePreview,
-		UnreadCount:        int(unreadCount),
+		UnreadCount:        unreadForDisplay(unreadCount, contact),
 		AssignedUserID:     contact.AssignedUserID,
 		WhatsAppAccount:    contact.WhatsAppAccount,
 		LastInboundAt:      contact.LastInboundAt,
@@ -1621,4 +1788,6 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		CreatedAt:          contact.CreatedAt,
 		UpdatedAt:          contact.UpdatedAt,
 	}
+	applyWorklistFields(&response, contact, a.assigneeNames([]models.Contact{*contact}))
+	return response
 }
