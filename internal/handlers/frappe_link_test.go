@@ -458,6 +458,16 @@ func TestAPISendsReportTheResult(t *testing.T) {
 		assert.True(t, saved.LastSendFailed)
 	})
 
+	t.Run("the chat list shows the template's text, not its name", func(t *testing.T) {
+		f := newHeldFixture(t)
+		f.template(t, "reminder", "en", "Yes")
+		contact := f.contact(t)
+		send(t, f, map[string]any{"contact_id": contact.ID.String(), "template_name": "reminder"}, true)
+		var saved models.Contact
+		require.NoError(t, f.app.DB.First(&saved, contact.ID).Error)
+		assert.Equal(t, "You have a message.", saved.LastMessagePreview)
+	})
+
 	t.Run("staff can't claim to be someone else", func(t *testing.T) {
 		f := newHeldFixture(t)
 		f.template(t, "reminder", "en", "Yes")
@@ -523,6 +533,11 @@ func TestFailedDownloadsCanBeRetried(t *testing.T) {
 	require.NoError(t, f.app.DB.First(&saved, message.ID).Error)
 	assert.Equal(t, float64(1), saved.Metadata["media_attempts"], "the failure is counted")
 	assert.Equal(t, "media-1", saved.Metadata["media_id"], "and it can be tried again")
+
+	// The background retry finds it too.
+	f.app.RetryFailedMediaDownloads(context.Background())
+	require.NoError(t, f.app.DB.First(&saved, message.ID).Error)
+	assert.Equal(t, float64(2), saved.Metadata["media_attempts"])
 
 	req := testutil.NewJSONRequest(t, map[string]any{})
 	testutil.SetAuthContext(req, f.org.ID, f.user.ID)

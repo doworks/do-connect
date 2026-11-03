@@ -319,6 +319,10 @@ func (a *App) SendOutgoingMessage(ctx context.Context, req OutgoingMessageReques
 
 	// Update contact's last message
 	preview := a.getMessagePreview(req)
+	// A template's text is more use in the chat list than its name.
+	if req.Type == models.MessageTypeTemplate && strings.TrimSpace(msg.Content) != "" {
+		preview = truncateString(msg.Content, 100)
+	}
 	a.updateContactLastMessage(req.Contact, preview)
 
 	return msg, nil

@@ -72,7 +72,7 @@ func (a *App) cleanUpOldRows() {
 // available for a while, so a short outage doesn't have to lose a patient's photo.
 func (a *App) RetryFailedMediaDownloads(ctx context.Context) {
 	var messages []models.Message
-	if err := a.DB.Where("direction = ? AND (media_url IS NULL OR media_url = '') AND metadata ? 'media_id' AND created_at > ?", models.DirectionIncoming, time.Now().Add(-mediaRetryWindow)).
+	if err := a.DB.Where("direction = ? AND (media_url IS NULL OR media_url = '') AND metadata->>'media_id' IS NOT NULL AND created_at > ?", models.DirectionIncoming, time.Now().Add(-mediaRetryWindow)).
 		Limit(20).Find(&messages).Error; err != nil {
 		a.Log.Error("Failed to load messages missing media", "error", err)
 		return

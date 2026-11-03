@@ -248,6 +248,8 @@ func getIndexes() []string {
 		// Templates sent through an API key before labels existed carry the key owner's name, though they
 		// came from an integration. Runs only until the first label exists, so later staff sends are never touched.
 		`UPDATE messages SET sent_by_label = 'Automatic' WHERE message_type = 'template' AND sent_by_user_id IN (SELECT user_id FROM api_keys) AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.sent_by_label <> '')`,
+		// Chats whose last message was a template showed its name; show its text instead.
+		`UPDATE contacts c SET last_message_preview = left(m.content, 100) FROM (SELECT DISTINCT ON (contact_id) contact_id, content FROM messages WHERE message_type = 'template' AND direction = 'outgoing' AND content <> '' AND deleted_at IS NULL ORDER BY contact_id, created_at DESC) m WHERE m.contact_id = c.id AND c.last_message_preview LIKE '[Template:%'`,
 		// Names Frappe already set stay set. Its contacts carry a language mark or the WhatsApp name in metadata.
 		`UPDATE contacts SET name_locked = true, whats_app_name = COALESCE(NULLIF(whats_app_name, ''), metadata->>'whatsapp_name', '') WHERE name_locked = false AND (profile_name LIKE 'AR · %' OR profile_name LIKE 'EN · %' OR metadata ? 'whatsapp_name')`,
 		// Fill the worklist columns for chats from before they existed. Rows get a direction once, so this is idempotent.
