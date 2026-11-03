@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -78,10 +79,7 @@ func (a *App) SaveMessageToClinic(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Your account has no email to match in the clinic system", nil, "")
 	}
 
-	filename := message.MediaFilename
-	if filename == "" {
-		filename = "whatsapp" + extensionForMime(message.MediaMimeType)
-	}
+	filename := mediaFilename(message)
 	status, answer, reason := a.callClinic(cfg, clinicRequest{
 		Action: "save_file",
 		Args: map[string]any{
@@ -89,7 +87,7 @@ func (a *App) SaveMessageToClinic(r *fastglue.Request) error {
 			"kind":         req.Kind,
 			"note":         req.Note,
 			"filename":     filename,
-			"content_type": message.MediaMimeType,
+			"content_type": baseMime(message.MediaMimeType),
 			"data":         base64.StdEncoding.EncodeToString(data),
 			"received_on":  message.CreatedAt.Format("2006-01-02"),
 			"caption":      message.Content,
@@ -122,7 +120,7 @@ func (a *App) SaveMessageToClinic(r *fastglue.Request) error {
 }
 
 func extensionForMime(mime string) string {
-	switch mime {
+	switch baseMime(mime) {
 	case "image/jpeg":
 		return ".jpg"
 	case "image/png":
@@ -133,10 +131,38 @@ func extensionForMime(mime string) string {
 		return ".pdf"
 	case "video/mp4":
 		return ".mp4"
+	case "video/3gpp":
+		return ".3gp"
 	case "audio/ogg":
 		return ".ogg"
+	case "audio/mpeg":
+		return ".mp3"
+	case "audio/aac":
+		return ".aac"
+	case "audio/amr":
+		return ".amr"
+	case "audio/mp4":
+		return ".m4a"
 	}
 	return ""
+}
+
+// baseMime drops parameters such as "; codecs=opus", which Meta's upload refuses.
+func baseMime(mime string) string {
+	if i := strings.Index(mime, ";"); i >= 0 {
+		mime = mime[:i]
+	}
+	return strings.TrimSpace(strings.ToLower(mime))
+}
+
+// mediaFilename is the stored name, or one made from the type. Patients'
+// photos, videos and voice notes arrive without a name, and Meta's upload
+// treats an empty name as no file at all.
+func mediaFilename(message *models.Message) string {
+	if message.MediaFilename != "" {
+		return message.MediaFilename
+	}
+	return "whatsapp" + extensionForMime(message.MediaMimeType)
 }
 
 // savedToClinicFrom reads the marker back for the chat screen.

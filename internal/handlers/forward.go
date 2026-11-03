@@ -152,8 +152,8 @@ func (a *App) forwardTo(r *fastglue.Request, orgID, userID uuid.UUID, source *mo
 			Type:          source.MessageType,
 			MediaData:     mediaData,
 			MediaURL:      source.MediaURL,
-			MediaMimeType: source.MediaMimeType,
-			MediaFilename: source.MediaFilename,
+			MediaMimeType: baseMime(source.MediaMimeType),
+			MediaFilename: mediaFilename(source),
 			Caption:       text,
 		}
 	}

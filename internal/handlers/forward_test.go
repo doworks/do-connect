@@ -14,7 +14,7 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-func (f heldFixture) received(t *testing.T, contact *models.Contact, kind models.MessageType, content, mediaURL string) *models.Message {
+func (f heldFixture) received(t *testing.T, contact *models.Contact, kind models.MessageType, content, mediaURL string, opts ...func(*models.Message)) *models.Message {
 	t.Helper()
 	message := &models.Message{
 		BaseModel:       models.BaseModel{ID: uuid.New()},
@@ -28,6 +28,9 @@ func (f heldFixture) received(t *testing.T, contact *models.Contact, kind models
 		MediaMimeType:   "image/jpeg",
 		MediaFilename:   "xray.jpg",
 		Status:          models.MessageStatusReceived,
+	}
+	for _, opt := range opts {
+		opt(message)
 	}
 	require.NoError(t, f.app.DB.Create(message).Error)
 	return message
@@ -102,6 +105,30 @@ func TestForwarding(t *testing.T) {
 		assert.Equal(t, "Lower left molar", images[0]["image"].(map[string]any)["caption"])
 		assert.Equal(t, "failed", results[1].Status)
 		assert.Contains(t, results[1].Reason, "Photos and files")
+	})
+
+	t.Run("a patient's photo and voice note arrive without a name and still forward", func(t *testing.T) {
+		f := newHeldFixture(t)
+		f.app.Config.Storage.LocalPath = t.TempDir()
+		for _, name := range []string{"in.jpg", "in.ogg"} {
+			require.NoError(t, os.WriteFile(filepath.Join(f.app.Config.Storage.LocalPath, name), []byte("bytes"), 0o600))
+		}
+		contact := f.contact(t, recentlyWrote)
+		photo := f.received(t, contact, models.MessageTypeImage, "", "in.jpg", func(m *models.Message) { m.MediaFilename = "" })
+		voice := f.received(t, contact, models.MessageTypeAudio, "", "in.ogg", func(m *models.Message) {
+			m.MediaFilename, m.MediaMimeType = "", "audio/ogg; codecs=opus"
+		})
+		target := f.contact(t, recentlyWrote)
+
+		_, results := f.forward(t, photo.ID, target.ID)
+		assert.Equal(t, "sent", results[0].Status, results[0].Reason)
+		_, results = f.forward(t, voice.ID, target.ID)
+		assert.Equal(t, "sent", results[0].Status, results[0].Reason)
+
+		require.Len(t, f.meta.uploads, 2)
+		assert.Contains(t, f.meta.uploads[0], `filename="whatsapp.jpg"`)
+		assert.Contains(t, f.meta.uploads[1], `filename="whatsapp.ogg"`)
+		assert.NotContains(t, f.meta.uploads[1], "codecs")
 	})
 
 	t.Run("what can't be forwarded says why", func(t *testing.T) {

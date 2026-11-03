@@ -23,6 +23,7 @@ import (
 type sentToMeta struct {
 	mu      sync.Mutex
 	sent    []map[string]any
+	uploads []string
 	refusal string
 }
 
@@ -35,9 +36,24 @@ func (s *sentToMeta) fail(reason string) {
 
 func (s *sentToMeta) RoundTrip(req *http.Request) (*http.Response, error) {
 	var parsed map[string]any
+	var raw []byte
 	if req.Body != nil {
-		body, _ := io.ReadAll(req.Body)
-		_ = json.Unmarshal(body, &parsed)
+		raw, _ = io.ReadAll(req.Body)
+		_ = json.Unmarshal(raw, &parsed)
+	}
+	if strings.HasSuffix(req.URL.Path, "/media") {
+		s.mu.Lock()
+		s.uploads = append(s.uploads, string(raw))
+		s.mu.Unlock()
+		recorder := httptest.NewRecorder()
+		// Like Meta: a file part without a name counts as no file.
+		if strings.Contains(string(raw), `filename=""`) {
+			recorder.WriteHeader(http.StatusBadRequest)
+			_, _ = recorder.WriteString(`{"error":{"message":"(#100) The parameter file is required.","code":100}}`)
+			return recorder.Result(), nil
+		}
+		_, _ = recorder.WriteString(`{"id":"media.` + uuid.NewString() + `"}`)
+		return recorder.Result(), nil
 	}
 	s.mu.Lock()
 	refusal := s.refusal
@@ -49,10 +65,6 @@ func (s *sentToMeta) RoundTrip(req *http.Request) (*http.Response, error) {
 	if refusal != "" {
 		recorder.WriteHeader(http.StatusBadRequest)
 		_, _ = recorder.WriteString(`{"error":{"code":132001,"message":"` + refusal + `"}}`)
-		return recorder.Result(), nil
-	}
-	if strings.HasSuffix(req.URL.Path, "/media") {
-		_, _ = recorder.WriteString(`{"id":"media.` + uuid.NewString() + `"}`)
 		return recorder.Result(), nil
 	}
 	_, _ = recorder.WriteString(`{"messages":[{"id":"wamid.` + uuid.NewString() + `"}]}`)
