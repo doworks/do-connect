@@ -74,6 +74,29 @@ func (a *App) unlockTemplate(contact *models.Contact, account *models.WhatsAppAc
 
 // holdTextMessage saves the message and asks the patient to open the window.
 func (a *App) holdTextMessage(r *fastglue.Request, contact *models.Contact, account *models.WhatsAppAccount, template *models.Template, body string, userID uuid.UUID) error {
+	message, err := a.holdText(contact, account, template, body, userID, nil)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save the message", nil, "")
+	}
+
+	response := MessageResponse{
+		ID:              message.ID,
+		ContactID:       message.ContactID,
+		Direction:       message.Direction,
+		MessageType:     message.MessageType,
+		Content:         map[string]string{"body": message.Content},
+		Status:          message.Status,
+		WhatsAppAccount: message.WhatsAppAccount,
+		CreatedAt:       message.CreatedAt,
+		UpdatedAt:       message.UpdatedAt,
+	}
+	applySenderFields(&response, message)
+	return r.SendEnvelope(response)
+}
+
+// holdText saves a text to go out when the patient replies, and sends the unlock
+// template unless one went out recently.
+func (a *App) holdText(contact *models.Contact, account *models.WhatsAppAccount, template *models.Template, body string, userID uuid.UUID, metadata models.JSONB) (*models.Message, error) {
 	message := &models.Message{
 		BaseModel:       models.BaseModel{ID: uuid.New()},
 		OrganizationID:  account.OrganizationID,
@@ -84,10 +107,11 @@ func (a *App) holdTextMessage(r *fastglue.Request, contact *models.Contact, acco
 		Content:         body,
 		Status:          models.MessageStatusHeld,
 		SentByUserID:    &userID,
+		Metadata:        metadata,
 	}
 	if err := a.DB.Create(message).Error; err != nil {
 		a.Log.Error("Failed to hold message", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save the message", nil, "")
+		return nil, err
 	}
 	message.SentByUser = a.senderUser(userID)
 	a.updateContactLastMessage(contact, truncateString(body, 100))
@@ -106,20 +130,7 @@ func (a *App) holdTextMessage(r *fastglue.Request, contact *models.Contact, acco
 			a.Log.Error("Failed to send unlock template", "error", err, "contact_id", contact.ID)
 		}
 	}
-
-	response := MessageResponse{
-		ID:              message.ID,
-		ContactID:       message.ContactID,
-		Direction:       message.Direction,
-		MessageType:     message.MessageType,
-		Content:         map[string]string{"body": message.Content},
-		Status:          message.Status,
-		WhatsAppAccount: message.WhatsAppAccount,
-		CreatedAt:       message.CreatedAt,
-		UpdatedAt:       message.UpdatedAt,
-	}
-	applySenderFields(&response, message)
-	return r.SendEnvelope(response)
+	return message, nil
 }
 
 func (a *App) unlockRecentlySent(contactID uuid.UUID, templateName string) bool {

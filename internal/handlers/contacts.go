@@ -81,6 +81,7 @@ type MessageResponse struct {
 	WhatsAppAccount  string               `json:"whatsapp_account,omitempty"`
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
+	Forwarded        bool                 `json:"forwarded,omitempty"`
 }
 
 // ReplyPreview contains a preview of the replied-to message
@@ -290,6 +291,7 @@ func applySenderFields(response *MessageResponse, message *models.Message) {
 	response.TemplateName = message.TemplateName
 	response.DeliveredAt = message.DeliveredAt
 	response.ReadAt = message.ReadAt
+	_, response.Forwarded = message.Metadata["forwarded_from"]
 	if message.SentByUser != nil {
 		response.SentByName = message.SentByUser.FullName
 	}

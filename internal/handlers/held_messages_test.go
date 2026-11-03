@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -48,6 +49,10 @@ func (s *sentToMeta) RoundTrip(req *http.Request) (*http.Response, error) {
 	if refusal != "" {
 		recorder.WriteHeader(http.StatusBadRequest)
 		_, _ = recorder.WriteString(`{"error":{"code":132001,"message":"` + refusal + `"}}`)
+		return recorder.Result(), nil
+	}
+	if strings.HasSuffix(req.URL.Path, "/media") {
+		_, _ = recorder.WriteString(`{"id":"media.` + uuid.NewString() + `"}`)
 		return recorder.Result(), nil
 	}
 	_, _ = recorder.WriteString(`{"messages":[{"id":"wamid.` + uuid.NewString() + `"}]}`)

@@ -75,6 +75,7 @@ import {
   UserX,
   Play,
   Reply,
+  Forward,
   X,
   SmilePlus,
   MapPin,
@@ -108,6 +109,7 @@ import TemplatePicker from '@/components/chat/TemplatePicker.vue'
 import MediaViewerDialog from '@/components/chat/MediaViewerDialog.vue'
 import PatientPanel from '@/components/chat/PatientPanel.vue'
 import PatientStrip from '@/components/chat/PatientStrip.vue'
+import ForwardDialog from '@/components/chat/ForwardDialog.vue'
 import { useClinicStore } from '@/stores/clinic'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
 import ConversationNotes from '@/components/chat/ConversationNotes.vue'
@@ -1442,6 +1444,26 @@ function _toggleReactionPicker(messageId: string) {
 }
 void _toggleReactionPicker // Suppress unused warning
 
+const forwardingMessage = ref<Message | null>(null)
+const isForwardOpen = ref(false)
+
+function canForward(message: Message): boolean {
+  if (message.status === 'held' || ['reaction', 'call'].includes(message.message_type)) return false
+  if (isMediaMessage(message)) return !!message.media_url
+  return !!getMessageContent(message)
+}
+
+function forwardMessage(message: Message) {
+  forwardingMessage.value = message
+  isForwardOpen.value = true
+}
+
+const forwardPreview = computed(() => {
+  const message = forwardingMessage.value
+  if (!message) return ''
+  return getMessageContent(message) || `[${message.message_type}]`
+})
+
 function replyToMessage(message: Message) {
   contactsStore.setReplyingTo(message)
   nextTick(() => {
@@ -2539,6 +2561,7 @@ async function sendMediaMessage() {
                 ]"
               >
 
+                <div v-if="message.forwarded" class="flex items-center gap-1 text-[11px] italic text-muted-foreground mb-0.5"><Forward class="h-3 w-3" />{{ $t('chat.forwarded') }}</div>
                 <!-- Reply preview (if this message is replying to another) -->
                 <div
                   v-if="message.is_reply && message.reply_to_message"
@@ -2859,6 +2882,16 @@ async function sendMediaMessage() {
                 >
                   <Reply class="h-3 w-3" />
                 </Button>
+                <Button
+                  v-if="canForward(message)"
+                  variant="ghost"
+                  size="icon"
+                  class="h-6 w-6"
+                  :title="$t('chat.forward')"
+                  @click="forwardMessage(message)"
+                >
+                  <Forward class="h-3 w-3" />
+                </Button>
               </div>
               <!-- Reply button for outgoing messages (shown on hover) -->
               <div v-if="message.direction === 'outgoing'" class="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity self-center ml-1">
@@ -2888,6 +2921,16 @@ async function sendMediaMessage() {
                   @click="replyToMessage(message)"
                 >
                   <Reply class="h-3 w-3" />
+                </Button>
+                <Button
+                  v-if="canForward(message)"
+                  variant="ghost"
+                  size="icon"
+                  class="h-6 w-6"
+                  :title="$t('chat.forward')"
+                  @click="forwardMessage(message)"
+                >
+                  <Forward class="h-3 w-3" />
                 </Button>
                 <Button
                   v-if="message.status === 'failed' && message.message_type === 'text'"
@@ -3069,6 +3112,12 @@ async function sendMediaMessage() {
     />
 
     <!-- Patient details and clinic actions -->
+    <ForwardDialog
+      v-model:open="isForwardOpen"
+      :message-id="forwardingMessage?.id || null"
+      :preview="forwardPreview"
+      :default-country-code="defaultCountryCode"
+    />
     <PatientPanel
       v-if="contactsStore.currentContact && isPatientPanelOpen"
       v-model:view="patientPanelView"

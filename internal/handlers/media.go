@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -192,33 +193,15 @@ func (a *App) ServeMedia(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "No media found", nil, "")
 	}
 
-	// Security: prevent directory traversal and symlink attacks
-	filePath := filepath.Clean(message.MediaURL)
-	baseDir, err := filepath.Abs(a.getMediaStoragePath())
+	data, err := a.readStoredMedia(message.MediaURL)
 	if err != nil {
-		a.Log.Error("Storage configuration error", "error", err)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Storage configuration error", nil, "")
-	}
-	fullPath, err := filepath.Abs(filepath.Join(baseDir, filePath))
-	if err != nil || !strings.HasPrefix(fullPath, baseDir+string(os.PathSeparator)) {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid file path", nil, "")
-	}
-
-	// Reject symlinks
-	info, err := os.Lstat(fullPath)
-	if err != nil {
-		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "File not found", nil, "")
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid file path", nil, "")
-	}
-
-	// Read file
-	data, err := os.ReadFile(fullPath)
-	if err != nil {
-		a.Log.Error("Failed to read media file", "path", fullPath, "error", err)
+		var mediaErr *storedMediaError
+		if errors.As(err, &mediaErr) {
+			return r.SendErrorEnvelope(mediaErr.status, mediaErr.message, nil, "")
+		}
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to read file", nil, "")
 	}
+	filePath := filepath.Clean(message.MediaURL)
 
 	// Determine content type from extension
 	ext := strings.ToLower(filepath.Ext(filePath))
@@ -328,4 +311,39 @@ func (a *App) RetryMessageMedia(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadGateway, "Could not download the file: "+err.Error(), nil, "")
 	}
 	return r.SendEnvelope(map[string]any{"media_url": messageMediaURL(&message)})
+}
+
+type storedMediaError struct {
+	status  int
+	message string
+}
+
+func (e *storedMediaError) Error() string { return e.message }
+
+// readStoredMedia reads a saved media file, refusing paths outside the media
+// folder and symlinks.
+func (a *App) readStoredMedia(mediaURL string) ([]byte, error) {
+	filePath := filepath.Clean(mediaURL)
+	baseDir, err := filepath.Abs(a.getMediaStoragePath())
+	if err != nil {
+		a.Log.Error("Storage configuration error", "error", err)
+		return nil, &storedMediaError{fasthttp.StatusInternalServerError, "Storage configuration error"}
+	}
+	fullPath, err := filepath.Abs(filepath.Join(baseDir, filePath))
+	if err != nil || !strings.HasPrefix(fullPath, baseDir+string(os.PathSeparator)) {
+		return nil, &storedMediaError{fasthttp.StatusBadRequest, "Invalid file path"}
+	}
+	info, err := os.Lstat(fullPath)
+	if err != nil {
+		return nil, &storedMediaError{fasthttp.StatusNotFound, "File not found"}
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, &storedMediaError{fasthttp.StatusBadRequest, "Invalid file path"}
+	}
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		a.Log.Error("Failed to read media file", "path", fullPath, "error", err)
+		return nil, err
+	}
+	return data, nil
 }

@@ -311,7 +311,16 @@ export const clinicService = {
     `${base.replace(/\/$/, '')}/app/${doctype.toLowerCase().replace(/ /g, '-')}/${encodeURIComponent(name)}`,
 }
 
+export interface ForwardResult {
+  contact_id: string
+  status: 'sent' | 'held' | 'failed'
+  reason?: string
+  message_id?: string
+}
+
 export const messagesService = {
+  forward: (messageId: string, contactIds: string[]) =>
+    api.post<{ data: { results: ForwardResult[] } }>(`/messages/${messageId}/forward`, { contact_ids: contactIds }),
   retryMedia: (contactId: string, messageId: string) =>
     api.post(`/contacts/${contactId}/messages/${messageId}/download-media`),
   cancelHeld: (contactId: string, messageId: string) =>
