@@ -261,6 +261,9 @@ function useDraft(text: string) {
 
 // Numbers staff type without a country code get this one (Settings, General).
 const defaultCountryCode = ref('')
+// Messages can wait for the patient only once an unlock template is set up.
+const canHoldMessages = ref(false)
+const holdsMessages = computed(() => isServiceWindowExpired.value && canHoldMessages.value)
 
 // Frappe starts a contact's name with the language to reply in ("AR · Sara").
 const LANGUAGE_PREFIX = /^(AR|EN) · /
@@ -628,7 +631,11 @@ onMounted(async () => {
   }
 
   organizationService.getSettings()
-    .then(response => { defaultCountryCode.value = response.data.data?.settings?.default_country_code || '' })
+    .then(response => {
+      const settings = response.data.data?.settings || {}
+      defaultCountryCode.value = settings.default_country_code || ''
+      canHoldMessages.value = !!(settings.unlock_template_en || settings.unlock_template_ar)
+    })
     .catch(() => { /* typed numbers then need their country code */ })
 
   // Setup infinite scroll for contacts list
@@ -2233,7 +2240,9 @@ async function sendMediaMessage() {
     </div>
 
     <!-- Chat Area -->
-    <div class="flex-1 flex flex-col bg-[#0f0f10] light:bg-gray-50">
+    <!-- min-w-0: without it, a long line (such as a reply to a long template)
+         stretches the chat past the screen and pushes the messages out of view. -->
+    <div class="flex-1 min-w-0 flex flex-col bg-[#0f0f10] light:bg-gray-50">
       <!-- No Contact Selected -->
       <div
         v-if="!contactsStore.currentContact"
@@ -2910,7 +2919,7 @@ async function sendMediaMessage() {
 
         <!-- 24-hour window closed: staff type normally, the message waits for the patient -->
         <div
-          v-if="isServiceWindowExpired"
+          v-if="holdsMessages"
           class="px-4 py-2 border-t border-amber-500/25 bg-amber-500/10 light:bg-amber-50 light:border-amber-200 flex items-center gap-2"
         >
           <Hourglass class="h-4 w-4 text-amber-400 light:text-amber-600 shrink-0" />
@@ -2925,6 +2934,18 @@ async function sendMediaMessage() {
           <button type="button" class="shrink-0 text-[11px] underline text-amber-300 light:text-amber-800" @click="openTemplatePicker">
             {{ $t('chat.sendTemplateInstead') }}
           </button>
+        </div>
+
+        <!-- 24-hour window closed and nothing set up to hold messages: only templates go out -->
+        <div
+          v-else-if="isServiceWindowExpired"
+          class="px-4 py-2.5 border-t border-red-500/20 bg-red-500/10 flex items-center gap-2"
+        >
+          <Clock class="h-4 w-4 text-red-500 shrink-0" />
+          <span class="text-sm text-red-500 flex-1">{{ $t('chat.serviceWindowExpired') }}</span>
+          <Button variant="outline" size="sm" class="border-red-500/30 text-red-500 hover:bg-red-500/10 shrink-0" @click="openTemplatePicker">
+            {{ $t('chat.sendTemplateAction') }}
+          </Button>
         </div>
 
         <!-- Reply indicator -->
@@ -3024,13 +3045,13 @@ async function sendMediaMessage() {
               type="submit"
               :class="[
                 'h-9 rounded-lg flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50',
-                isServiceWindowExpired
+                holdsMessages
                   ? 'px-3 shrink-0 text-xs font-medium text-white bg-amber-600 hover:bg-amber-500'
                   : 'w-9 bg-emerald-600 hover:bg-emerald-500 light:bg-emerald-500 light:hover:bg-emerald-600'
               ]"
               :disabled="!messageInput.trim() || isSending"
             >
-              <template v-if="isServiceWindowExpired">
+              <template v-if="holdsMessages">
                 <Hourglass class="w-3.5 h-3.5" />{{ $t('chat.sendWhenTheyReply') }}
               </template>
               <Send v-else class="w-4 h-4 text-white" />
