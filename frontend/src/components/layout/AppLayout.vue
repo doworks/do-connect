@@ -17,6 +17,7 @@ import { authService } from '@/services/api'
 import OrganizationSwitcher from './OrganizationSwitcher.vue'
 import UserMenu from './UserMenu.vue'
 import ActiveCallPanel from '@/components/calling/ActiveCallPanel.vue'
+import RefusedEventsBanner from './RefusedEventsBanner.vue'
 import { ScrollToTop } from '@/components/shared'
 import { navigationSections, type NavSection } from './navigation'
 
@@ -288,12 +289,15 @@ const handleLogout = async () => {
     </aside>
 
     <!-- Main content -->
-    <main id="main-content" class="flex-1 overflow-hidden pt-12 md:pt-0 bg-[#0a0a0b] light:bg-gray-50" role="main">
-      <RouterView v-slot="{ Component, route: viewRoute }">
-        <Transition name="page" mode="out-in">
-          <component :is="Component" :key="viewRoute.meta.stableKey ? String(viewRoute.name) : viewRoute.path" />
-        </Transition>
-      </RouterView>
+    <main id="main-content" class="flex-1 flex flex-col min-w-0 overflow-hidden pt-12 md:pt-0 bg-[#0a0a0b] light:bg-gray-50" role="main">
+      <RefusedEventsBanner />
+      <div class="flex-1 min-h-0">
+        <RouterView v-slot="{ Component, route: viewRoute }">
+          <Transition name="page" mode="out-in">
+            <component :is="Component" :key="viewRoute.meta.stableKey ? String(viewRoute.name) : viewRoute.path" />
+          </Transition>
+        </RouterView>
+      </div>
       <ActiveCallPanel />
       <ScrollToTop />
     </main>

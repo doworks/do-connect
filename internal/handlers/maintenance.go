@@ -66,6 +66,7 @@ func (a *App) cleanUpOldRows() {
 	a.DB.Unscoped().Where("status = ? AND created_at < ?", models.WebhookDeliveryDelivered, now.Add(-deliveredDeliveryRetention)).Delete(&models.WebhookDelivery{})
 	a.DB.Unscoped().Where("status = ? AND created_at < ?", models.WebhookDeliveryFailed, now.Add(-failedDeliveryRetention)).Delete(&models.WebhookDelivery{})
 	a.DB.Unscoped().Where("processed_at IS NOT NULL AND created_at < ?", now.Add(-incomingQueueRetention)).Delete(&models.IncomingWebhook{})
+	a.DB.Unscoped().Where("created_at < ?", now.Add(-refusedRetention)).Delete(&models.RefusedWebhook{})
 }
 
 // RetryFailedMediaDownloads fetches files that failed on arrival. Meta keeps them

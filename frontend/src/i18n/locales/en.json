@@ -1458,7 +1458,21 @@
     "appId": "App ID",
     "defaults": "Defaults",
     "status": "Status",
-    "appSecretMissing": "No App Secret is set, so messages can't be checked as really coming from Meta. Anyone who finds the webhook address could post fake patient messages. Add it from your Meta app's settings."
+    "appSecretMissing": "No App Secret is set, so messages can't be checked as really coming from Meta. Anyone who finds the webhook address could post fake patient messages. Add it from your Meta app's settings.",
+    "refusedBanner": "WhatsApp events for {account} are being refused ({events} in the last 7 days, patient messages among them: {messages}). They're kept, and can be accepted.",
+    "refusedBannerNumber": "a number",
+    "refusedReview": "Review",
+    "refusedTitle": "Refused events",
+    "refusedHint": "Events that failed the check that they came from Meta. They're kept for 30 days. Accept one only if you trust it, for example when the App Secret was wrong or a relay dropped the signature.",
+    "refusedMissing": "No signature",
+    "refusedWrong": "Wrong signature",
+    "refusedStatuses": "{count} delivery updates",
+    "refusedAccept": "Accept",
+    "refusedAccepted": "Accepted",
+    "refusedAcceptedBy": "Accepted by {name}",
+    "refusedAcceptedToast": "Accepted. The messages are now in the chats.",
+    "refusedPending": "{count} not accepted",
+    "refusedAdvice": "If every event is refused, check the App Secret here matches the one in your Meta app, and that anything forwarding Meta's events passes on the X-Hub-Signature-256 header."
   },
   "dashboard": {
     "title": "Dashboard",

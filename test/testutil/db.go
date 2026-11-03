@@ -92,6 +92,7 @@ func runMigrations(db *gorm.DB) error {
 		&models.Webhook{},
 		&models.WebhookDelivery{},
 		&models.IncomingWebhook{},
+		&models.RefusedWebhook{},
 		&models.CustomAction{},
 		&models.UserAvailabilityLog{},
 		// WhatsApp models

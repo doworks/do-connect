@@ -409,6 +409,92 @@ func TestIncomingMessages(t *testing.T) {
 		assert.Equal(t, fasthttp.StatusOK, post(t, f, body, sign(body, "meta-secret")), "signed by Meta")
 		waitForMessage(t, f, id)
 	})
+
+	t.Run("a refused message is kept, shown to admins and can be accepted", func(t *testing.T) {
+		f := newHeldFixture(t)
+		require.NoError(t, f.app.DB.Model(f.account).Update("app_secret", "meta-secret").Error)
+		f.app.InvalidateWhatsAppAccountCache(f.account.PhoneID)
+		id := "wamid." + uuid.NewString()
+		body := webhookBody(f.account.PhoneID, id, "Can I come at 5?")
+
+		assert.Equal(t, fasthttp.StatusForbidden, post(t, f, body, ""))
+		assert.Equal(t, fasthttp.StatusForbidden, post(t, f, webhookBody(f.account.PhoneID, "wamid."+uuid.NewString(), "x"), "sha256=00"))
+
+		summaryReq := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(summaryReq, f.org.ID, f.user.ID)
+		require.NoError(t, f.app.RefusedWebhookSummary(summaryReq))
+		var summary struct {
+			Data struct {
+				Accounts []struct {
+					AccountID    uuid.UUID `json:"account_id"`
+					Events       int       `json:"events"`
+					Messages     int       `json:"messages"`
+					LatestReason string    `json:"latest_reason"`
+				} `json:"accounts"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(summaryReq), &summary))
+		require.Len(t, summary.Data.Accounts, 1)
+		assert.Equal(t, f.account.ID, summary.Data.Accounts[0].AccountID)
+		assert.Equal(t, 2, summary.Data.Accounts[0].Events)
+		assert.Equal(t, 2, summary.Data.Accounts[0].Messages)
+		assert.Equal(t, refusedWrongSignature, summary.Data.Accounts[0].LatestReason)
+
+		listReq := testutil.NewGETRequest(t)
+		testutil.SetAuthContext(listReq, f.org.ID, f.user.ID)
+		testutil.SetPathParam(listReq, "id", f.account.ID.String())
+		require.NoError(t, f.app.ListRefusedWebhooks(listReq))
+		var list struct {
+			Data struct {
+				Events []RefusedWebhookResponse `json:"events"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(testutil.GetResponseBody(listReq), &list))
+		require.Len(t, list.Data.Events, 2)
+		missing := list.Data.Events[1]
+		assert.Equal(t, refusedMissingSignature, missing.Reason)
+		require.Len(t, missing.Messages, 1)
+		assert.Equal(t, "Can I come at 5?", missing.Messages[0].Text)
+		assert.Equal(t, "97333112233", missing.Messages[0].From)
+
+		accept := func() int {
+			req := testutil.NewJSONRequest(t, map[string]any{})
+			testutil.SetAuthContext(req, f.org.ID, f.user.ID)
+			testutil.SetPathParam(req, "id", f.account.ID.String())
+			testutil.SetPathParam(req, "event_id", missing.ID.String())
+			require.NoError(t, f.app.AcceptRefusedWebhook(req))
+			return testutil.GetResponseStatusCode(req)
+		}
+		assert.Equal(t, fasthttp.StatusOK, accept())
+		waitForMessage(t, f, id)
+		assert.Equal(t, fasthttp.StatusOK, accept(), "accepting twice is harmless")
+		f.app.WaitForBackgroundTasks()
+		var count int64
+		f.app.DB.Model(&models.Message{}).Where("whats_app_message_id = ?", id).Count(&count)
+		assert.Equal(t, int64(1), count)
+
+		var kept models.RefusedWebhook
+		require.NoError(t, f.app.DB.First(&kept, missing.ID).Error)
+		assert.NotNil(t, kept.AcceptedAt)
+		assert.Equal(t, f.user.ID, *kept.AcceptedByID)
+	})
+
+	t.Run("refused events from another organisation can't be accepted", func(t *testing.T) {
+		f := newHeldFixture(t)
+		other := newHeldFixture(t)
+		require.NoError(t, f.app.DB.Model(f.account).Update("app_secret", "meta-secret").Error)
+		f.app.InvalidateWhatsAppAccountCache(f.account.PhoneID)
+		assert.Equal(t, fasthttp.StatusForbidden, post(t, f, webhookBody(f.account.PhoneID, "wamid."+uuid.NewString(), "x"), ""))
+		var kept models.RefusedWebhook
+		require.NoError(t, f.app.DB.Where("account_id = ?", f.account.ID).First(&kept).Error)
+
+		req := testutil.NewJSONRequest(t, map[string]any{})
+		testutil.SetAuthContext(req, other.org.ID, other.user.ID)
+		testutil.SetPathParam(req, "id", f.account.ID.String())
+		testutil.SetPathParam(req, "event_id", kept.ID.String())
+		require.NoError(t, f.app.AcceptRefusedWebhook(req))
+		assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
+	})
 }
 
 func TestAPISendsReportTheResult(t *testing.T) {

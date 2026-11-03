@@ -3,7 +3,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { api } from '@/services/api'
+import { api, accountsService, type RefusedEvent } from '@/services/api'
 import { toast } from 'vue-sonner'
 import { getErrorMessage } from '@/lib/api-utils'
 import { getQualityBadgeClass, getQualityRatingLabel, getVerificationBadgeClass, getVerificationStatusLabel, formatLimitTier } from '@/lib/utils'
@@ -106,6 +106,34 @@ const isProfileDialogOpen = ref(false)
 const { showLeaveDialog, confirmLeave, cancelLeave } = useUnsavedChangesGuard(hasChanges)
 
 const canWrite = computed(() => authStore.hasPermission('accounts', 'write'))
+
+const refusedEvents = ref<RefusedEvent[]>([])
+const acceptingId = ref<string | null>(null)
+const pendingRefused = computed(() => refusedEvents.value.filter(e => !e.accepted_at).length)
+
+async function loadRefused() {
+  if (!account.value) return
+  try {
+    const response = await accountsService.refusedEvents(account.value.id, { limit: 50 })
+    refusedEvents.value = response.data.data?.events || []
+  } catch {
+    refusedEvents.value = []
+  }
+}
+
+async function acceptRefused(event: RefusedEvent) {
+  if (!account.value) return
+  acceptingId.value = event.id
+  try {
+    await accountsService.acceptRefused(account.value.id, event.id)
+    toast.success(t('accounts.refusedAcceptedToast'))
+    await loadRefused()
+  } catch (e) {
+    toast.error(getErrorMessage(e, t('accounts.refusedAccept')))
+  } finally {
+    acceptingId.value = null
+  }
+}
 const canDelete = computed(() => authStore.hasPermission('accounts', 'delete'))
 
 const form = ref({
@@ -143,6 +171,7 @@ async function loadAccount() {
     const data = response.data.data || response.data
     account.value = data
     syncForm()
+    loadRefused()
     nextTick(() => { hasChanges.value = false })
   } catch {
     isNotFound.value = true
@@ -306,6 +335,48 @@ onMounted(async () => {
         </Button>
       </div>
     </template>
+
+    <Card v-if="refusedEvents.length" :class="pendingRefused ? 'border-red-800 light:border-red-300' : ''">
+      <CardHeader class="pb-3">
+        <CardTitle class="text-sm font-medium flex items-center gap-2">
+          <AlertCircle :class="['h-4 w-4', pendingRefused ? 'text-red-500' : 'text-muted-foreground']" />
+          {{ $t('accounts.refusedTitle') }}
+          <span v-if="pendingRefused" class="h-5 px-1.5 rounded-full leading-5 text-[11px] font-medium bg-red-500/15 text-red-500">
+            {{ $t('accounts.refusedPending', { count: pendingRefused }) }}
+          </span>
+        </CardTitle>
+        <p class="text-xs text-muted-foreground">{{ $t('accounts.refusedHint') }}</p>
+        <p v-if="pendingRefused" class="text-xs text-red-400 light:text-red-600">{{ $t('accounts.refusedAdvice') }}</p>
+      </CardHeader>
+      <CardContent class="p-0">
+        <div v-for="event in refusedEvents" :key="event.id" class="flex items-start gap-2 px-6 py-2 border-t text-xs">
+          <span
+            :class="[
+              'shrink-0 h-5 px-1.5 rounded-full leading-5 font-medium',
+              event.accepted_at ? 'bg-emerald-500/15 text-emerald-500' : 'bg-red-500/15 text-red-500'
+            ]"
+          >{{ event.accepted_at ? $t('accounts.refusedAccepted') : event.reason === 'missing_signature' ? $t('accounts.refusedMissing') : $t('accounts.refusedWrong') }}</span>
+          <span class="min-w-0 flex-1">
+            <span class="text-muted-foreground">{{ new Date(event.created_at).toLocaleString() }}</span>
+            <span v-if="event.status_count" class="text-muted-foreground"> · {{ $t('accounts.refusedStatuses', { count: event.status_count }) }}</span>
+            <span v-if="event.accepted_by_name" class="text-muted-foreground"> · {{ $t('accounts.refusedAcceptedBy', { name: event.accepted_by_name }) }}</span>
+            <span v-for="(msg, i) in event.messages || []" :key="i" class="block break-words">
+              <span class="font-medium" dir="ltr">+{{ msg.from }}</span>
+              <span class="text-muted-foreground"> · {{ msg.type }}</span>
+              <template v-if="msg.text"> · <bdi>{{ msg.text }}</bdi></template>
+            </span>
+          </span>
+          <Button
+            v-if="!event.accepted_at && canWrite"
+            size="sm"
+            variant="outline"
+            class="h-6 px-2 text-[11px] shrink-0"
+            :disabled="acceptingId === event.id"
+            @click="acceptRefused(event)"
+          >{{ $t('accounts.refusedAccept') }}</Button>
+        </div>
+      </CardContent>
+    </Card>
 
     <!-- Test Result -->
     <Card v-if="testResult">

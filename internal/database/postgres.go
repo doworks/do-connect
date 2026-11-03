@@ -68,6 +68,7 @@ func GetMigrationModels() []MigrationModel {
 		{"Webhook", &models.Webhook{}},
 		{"WebhookDelivery", &models.WebhookDelivery{}},
 		{"IncomingWebhook", &models.IncomingWebhook{}},
+		{"RefusedWebhook", &models.RefusedWebhook{}},
 		{"CustomAction", &models.CustomAction{}},
 		{"WhatsAppAccount", &models.WhatsAppAccount{}},
 		{"Contact", &models.Contact{}},

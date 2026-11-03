@@ -313,6 +313,25 @@ func (IncomingWebhook) TableName() string {
 	return "incoming_webhooks"
 }
 
+// RefusedWebhook is an event from Meta that failed the signature check. It's kept
+// so an admin can see it and, if it's genuine, accept it instead of losing it.
+type RefusedWebhook struct {
+	BaseModel
+	OrganizationID uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
+	AccountID      uuid.UUID  `gorm:"type:uuid;index;not null" json:"account_id"`
+	PhoneNumberID  string     `gorm:"size:100;not null" json:"phone_number_id"`
+	Reason         string     `gorm:"size:30;not null" json:"reason"` // missing_signature, wrong_signature
+	Body           string     `gorm:"type:text;not null" json:"-"`
+	MessageCount   int        `gorm:"default:0" json:"message_count"`
+	StatusCount    int        `gorm:"default:0" json:"status_count"`
+	AcceptedAt     *time.Time `json:"accepted_at,omitempty"`
+	AcceptedByID   *uuid.UUID `gorm:"type:uuid" json:"accepted_by_id,omitempty"`
+}
+
+func (RefusedWebhook) TableName() string {
+	return "refused_webhooks"
+}
+
 // CustomAction represents a custom action button for chat integrations
 type CustomAction struct {
 	BaseModel

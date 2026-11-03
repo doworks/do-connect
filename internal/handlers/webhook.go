@@ -173,6 +173,7 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 	// Verify webhook signature before processing any fields. A number with an App
 	// Secret only accepts signed events, so nobody can post fake patient messages.
 	// A number without one can't be verified, which the account page warns about.
+	// A refused event is kept, so an admin can see it and accept it if it's real.
 	for _, entry := range payload.Entry {
 		for _, change := range entry.Changes {
 			phoneNumberID := change.Value.Metadata.PhoneNumberID
@@ -184,7 +185,12 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 				continue
 			}
 			if !verifyWebhookSignature(body, signature, []byte(account.AppSecret)) {
-				a.Log.Warn("Invalid or missing webhook signature", "phone_id", phoneNumberID)
+				reason := refusedWrongSignature
+				if len(signature) == 0 {
+					reason = refusedMissingSignature
+				}
+				a.Log.Warn("Invalid or missing webhook signature", "phone_id", phoneNumberID, "reason", reason)
+				a.saveRefusedWebhook(account, phoneNumberID, reason, body, &payload)
 				return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Invalid signature", nil, "")
 			}
 			a.Log.Debug("Webhook signature verified successfully")
@@ -192,6 +198,18 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 		}
 	}
 
+	if err := a.processWebhookPayload(&payload, false); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Could not save the message", nil, "")
+	}
+
+	// Always respond with 200 to acknowledge receipt
+	return r.SendEnvelope(map[string]string{"status": "ok"})
+}
+
+// processWebhookPayload handles every change in a verified event. Call events are
+// skipped when replaying a saved event, because the call is long over by then.
+// It returns an error only when a patient's message couldn't be saved.
+func (a *App) processWebhookPayload(payload *WebhookPayload, replay bool) error {
 	// Process each entry
 	for _, entry := range payload.Entry {
 		for _, change := range entry.Changes {
@@ -220,6 +238,9 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 			// Handle voice call events (processed sequentially to preserve event order
 			// and avoid race conditions between ringing/connect for the same call)
 			if change.Field == "calls" {
+				if replay {
+					continue
+				}
 				phoneNumberID := change.Value.Metadata.PhoneNumberID
 				for _, call := range change.Value.Calls {
 					a.Log.Info("Received call event",
@@ -328,7 +349,7 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 				row, err := a.queueIncomingMessage(phoneNumberID, msg, profileName)
 				if err != nil {
 					a.Log.Error("Failed to save incoming message", "error", err, "message_id", msg.ID)
-					return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Could not save the message", nil, "")
+					return err
 				}
 
 				// Process message asynchronously
@@ -346,9 +367,7 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 			}
 		}
 	}
-
-	// Always respond with 200 to acknowledge receipt
-	return r.SendEnvelope(map[string]string{"status": "ok"})
+	return nil
 }
 
 func (a *App) processIncomingMessage(phoneNumberID string, msg IncomingTextMessage, profileName string) {

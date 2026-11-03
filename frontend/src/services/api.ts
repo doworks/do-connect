@@ -184,8 +184,31 @@ export const apiKeysService = {
   delete: (id: string) => api.delete(`/api-keys/${id}`)
 }
 
+export interface RefusedSummary {
+  account_id: string
+  events: number
+  messages: number
+  latest_at: string
+  latest_reason: 'missing_signature' | 'wrong_signature'
+}
+
+export interface RefusedEvent {
+  id: string
+  created_at: string
+  reason: 'missing_signature' | 'wrong_signature'
+  message_count: number
+  status_count: number
+  messages?: { from: string; type: string; text?: string }[]
+  accepted_at?: string
+  accepted_by_name?: string
+}
+
 export const accountsService = {
-  list: () => api.get('/accounts')
+  list: () => api.get('/accounts'),
+  refusedSummary: () => api.get<{ data: { accounts: RefusedSummary[] } }>('/accounts/refused-events/summary'),
+  refusedEvents: (id: string, params?: { page?: number; limit?: number }) =>
+    api.get<{ data: { events: RefusedEvent[]; total: number } }>(`/accounts/${id}/refused-events`, { params }),
+  acceptRefused: (id: string, eventId: string) => api.post(`/accounts/${id}/refused-events/${eventId}/accept`),
 }
 
 export const contactsService = {
