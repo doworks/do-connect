@@ -1,17 +1,22 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/middleware"
+	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -159,5 +164,64 @@ func TestClinicPanel(t *testing.T) {
 		srv.Close()
 		req = f.panel(t, "GET", "context", nil, map[string]string{"phone": "1"})
 		assert.Equal(t, fasthttp.StatusBadGateway, testutil.GetResponseStatusCode(req), "clinic system down")
+	})
+}
+
+func TestSavingToThePatientsFile(t *testing.T) {
+	save := func(t *testing.T, f heldFixture, messageID uuid.UUID, body map[string]any) *fastglue.Request {
+		t.Helper()
+		req := testutil.NewJSONRequest(t, body)
+		testutil.SetAuthContext(req, f.org.ID, f.user.ID)
+		testutil.SetPathParam(req, "message_id", messageID.String())
+		require.NoError(t, f.app.SaveMessageToClinic(req))
+		return req
+	}
+
+	t.Run("the stored photo goes to the clinic system and the message remembers it", func(t *testing.T) {
+		f := newHeldFixture(t)
+		fc, srv := newFakeClinic(t)
+		f.clinic(srv.URL)
+		fc.reply = func(clinicRequest) (int, string) {
+			return 200, `{"message": {"file": "/private/files/xray.jpg", "patient_name": "Huda Ali"}}`
+		}
+		f.app.Config.Storage.LocalPath = t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(f.app.Config.Storage.LocalPath, "xray.jpg"), []byte("jpeg-bytes"), 0o600))
+		photo := f.received(t, f.contact(t, recentlyWrote), models.MessageTypeImage, "Lower left", "xray.jpg")
+
+		req := save(t, f, photo.ID, map[string]any{"patient": "PAT-1", "kind": "X-ray", "note": "Before extraction"})
+		require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req), string(testutil.GetResponseBody(req)))
+
+		require.Len(t, fc.requests, 1)
+		sent := fc.requests[0]
+		assert.True(t, fc.valid[0])
+		assert.Equal(t, "save_file", sent.Action)
+		assert.Equal(t, f.user.Email, sent.ActingUser)
+		assert.Equal(t, base64.StdEncoding.EncodeToString([]byte("jpeg-bytes")), sent.Args["data"])
+		assert.Equal(t, "X-ray", sent.Args["kind"])
+		assert.Equal(t, "Before extraction", sent.Args["note"])
+
+		marker := savedToClinicFrom(f.status(t, photo.ID).Metadata)
+		require.NotNil(t, marker)
+		assert.Equal(t, "Huda Ali", marker.PatientName)
+		assert.Equal(t, "Noor Ali", marker.ByName)
+		assert.Equal(t, "X-ray", marker.Kind)
+	})
+
+	t.Run("only photos and files, and the clinic system's refusal is passed on", func(t *testing.T) {
+		f := newHeldFixture(t)
+		fc, srv := newFakeClinic(t)
+		f.clinic(srv.URL)
+		text := f.received(t, f.contact(t, recentlyWrote), models.MessageTypeText, "hello", "")
+		req := save(t, f, text.ID, map[string]any{"patient": "PAT-1", "kind": "Other"})
+		assert.Equal(t, fasthttp.StatusUnprocessableEntity, testutil.GetResponseStatusCode(req))
+		assert.Empty(t, fc.requests)
+
+		f.app.Config.Storage.LocalPath = t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(f.app.Config.Storage.LocalPath, "scan.pdf"), []byte("%PDF"), 0o600))
+		pdf := f.received(t, f.contact(t, recentlyWrote), models.MessageTypeDocument, "", "scan.pdf")
+		fc.reply = func(clinicRequest) (int, string) { return 403, `{"exc_type": "PermissionError"}` }
+		req = save(t, f, pdf.ID, map[string]any{"patient": "PAT-1", "kind": "Lab report"})
+		assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
+		assert.Nil(t, savedToClinicFrom(f.status(t, pdf.ID).Metadata), "not marked when it wasn't saved")
 	})
 }

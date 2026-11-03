@@ -76,6 +76,7 @@ import {
   Play,
   Reply,
   Forward,
+  FolderInput,
   X,
   SmilePlus,
   MapPin,
@@ -110,6 +111,7 @@ import MediaViewerDialog from '@/components/chat/MediaViewerDialog.vue'
 import PatientPanel from '@/components/chat/PatientPanel.vue'
 import PatientStrip from '@/components/chat/PatientStrip.vue'
 import ForwardDialog from '@/components/chat/ForwardDialog.vue'
+import SaveToFileDialog from '@/components/chat/SaveToFileDialog.vue'
 import { useClinicStore } from '@/stores/clinic'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
 import ConversationNotes from '@/components/chat/ConversationNotes.vue'
@@ -1458,6 +1460,22 @@ function forwardMessage(message: Message) {
   isForwardOpen.value = true
 }
 
+const savingMessage = ref<Message | null>(null)
+const isSaveToFileOpen = ref(false)
+
+function canSaveToFile(message: Message): boolean {
+  return !!clinic.context && isMediaMessage(message) && !!message.media_url && message.message_type !== 'sticker'
+}
+
+function saveToFile(message: Message) {
+  savingMessage.value = message
+  isSaveToFileOpen.value = true
+}
+
+function onSavedToFile(marker: { patient: string; patient_name?: string; kind: string; by_name: string; at: string }) {
+  if (savingMessage.value) savingMessage.value.saved_to_clinic = marker
+}
+
 const forwardPreview = computed(() => {
   const message = forwardingMessage.value
   if (!message) return ''
@@ -2562,6 +2580,7 @@ async function sendMediaMessage() {
               >
 
                 <div v-if="message.forwarded" class="flex items-center gap-1 text-[11px] italic text-muted-foreground mb-0.5"><Forward class="h-3 w-3" />{{ $t('chat.forwarded') }}</div>
+                <div v-if="message.saved_to_clinic" class="flex items-center gap-1 text-[11px] text-sky-400 light:text-sky-700 mb-0.5"><FolderInput class="h-3 w-3" />{{ $t('chat.savedToFileLabel', { kind: message.saved_to_clinic.kind, name: message.saved_to_clinic.by_name }) }}</div>
                 <!-- Reply preview (if this message is replying to another) -->
                 <div
                   v-if="message.is_reply && message.reply_to_message"
@@ -2892,6 +2911,16 @@ async function sendMediaMessage() {
                 >
                   <Forward class="h-3 w-3" />
                 </Button>
+                <Button
+                  v-if="canSaveToFile(message)"
+                  variant="ghost"
+                  size="icon"
+                  class="h-6 w-6"
+                  :title="$t('chat.saveToFile')"
+                  @click="saveToFile(message)"
+                >
+                  <FolderInput class="h-3 w-3" />
+                </Button>
               </div>
               <!-- Reply button for outgoing messages (shown on hover) -->
               <div v-if="message.direction === 'outgoing'" class="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity self-center ml-1">
@@ -2931,6 +2960,16 @@ async function sendMediaMessage() {
                   @click="forwardMessage(message)"
                 >
                   <Forward class="h-3 w-3" />
+                </Button>
+                <Button
+                  v-if="canSaveToFile(message)"
+                  variant="ghost"
+                  size="icon"
+                  class="h-6 w-6"
+                  :title="$t('chat.saveToFile')"
+                  @click="saveToFile(message)"
+                >
+                  <FolderInput class="h-3 w-3" />
                 </Button>
                 <Button
                   v-if="message.status === 'failed' && message.message_type === 'text'"
@@ -3112,6 +3151,12 @@ async function sendMediaMessage() {
     />
 
     <!-- Patient details and clinic actions -->
+    <SaveToFileDialog
+      v-model:open="isSaveToFileOpen"
+      :message-id="savingMessage?.id || null"
+      :preview="savingMessage ? getMessageContent(savingMessage) : ''"
+      @saved="onSavedToFile"
+    />
     <ForwardDialog
       v-model:open="isForwardOpen"
       :message-id="forwardingMessage?.id || null"

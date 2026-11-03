@@ -637,6 +637,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/accounts/{id}/test", app.TestAccountConnection)
 	g.POST("/api/accounts/{id}/subscribe", app.SubscribeApp)
 	g.POST("/api/messages/{message_id}/forward", app.ForwardMessage)
+	g.POST("/api/messages/{message_id}/save-to-clinic", app.SaveMessageToClinic)
 	g.GET("/api/clinic/{action}", app.ClinicProxy)
 	g.POST("/api/clinic/{action}", app.ClinicProxy)
 	g.GET("/api/accounts/refused-events/summary", app.RefusedWebhookSummary)

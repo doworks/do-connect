@@ -82,6 +82,7 @@ type MessageResponse struct {
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
 	Forwarded        bool                 `json:"forwarded,omitempty"`
+	SavedToClinic    *SavedToClinic       `json:"saved_to_clinic,omitempty"`
 }
 
 // ReplyPreview contains a preview of the replied-to message
@@ -292,6 +293,7 @@ func applySenderFields(response *MessageResponse, message *models.Message) {
 	response.DeliveredAt = message.DeliveredAt
 	response.ReadAt = message.ReadAt
 	_, response.Forwarded = message.Metadata["forwarded_from"]
+	response.SavedToClinic = savedToClinicFrom(message.Metadata)
 	if message.SentByUser != nil {
 		response.SentByName = message.SentByUser.FullName
 	}

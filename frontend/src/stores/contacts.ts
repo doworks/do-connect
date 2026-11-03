@@ -58,6 +58,7 @@ export interface Message {
   direction: 'incoming' | 'outgoing'
   media_missing?: boolean
   forwarded?: boolean
+  saved_to_clinic?: { patient: string; patient_name?: string; kind: string; by_name: string; at: string }
   sent_by_user_id?: string
   sent_by_name?: string
   sent_by_label?: string

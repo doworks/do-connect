@@ -318,7 +318,19 @@ export interface ForwardResult {
   message_id?: string
 }
 
+export interface SavedToClinic {
+  patient: string
+  patient_name?: string
+  kind: string
+  file?: string
+  by_user_id: string
+  by_name: string
+  at: string
+}
+
 export const messagesService = {
+  saveToClinic: (messageId: string, data: { patient: string; kind: string; note?: string }) =>
+    api.post<{ data: SavedToClinic }>(`/messages/${messageId}/save-to-clinic`, data),
   forward: (messageId: string, contactIds: string[]) =>
     api.post<{ data: { results: ForwardResult[] } }>(`/messages/${messageId}/forward`, { contact_ids: contactIds }),
   retryMedia: (contactId: string, messageId: string) =>

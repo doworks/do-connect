@@ -47,6 +47,7 @@ export interface ClinicContext {
   can_link: boolean
   can_book: boolean
   can_view_billing: boolean
+  file_kinds?: string[]
 }
 
 const STORAGE_KEY = 'clinic_selected_patient'
