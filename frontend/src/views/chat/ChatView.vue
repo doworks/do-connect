@@ -707,7 +707,7 @@ function handleContactClick(contact: Contact) {
 }
 
 async function sendMessage() {
-  if (!messageInput.value.trim() || !contactsStore.currentContact) return
+  if (isSending.value || !messageInput.value.trim() || !contactsStore.currentContact) return
 
   isSending.value = true
   try {
