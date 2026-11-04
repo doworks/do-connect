@@ -350,7 +350,23 @@ const frappeUrl = computed(() => patient.value && clinic.context?.frappe_url
 
           <section v-if="patient.notes?.length" class="space-y-1">
             <h4 class="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground"><StickyNote class="h-3.5 w-3.5" />{{ t('clinic.frontDeskNotes') }}</h4>
-            <p v-for="note in patient.notes" :key="note.text" class="rounded-md bg-white/[0.05] light:bg-gray-100 px-2 py-1.5" dir="auto">{{ note.text }} <span class="text-muted-foreground">· {{ note.by }}</span></p>
+            <div
+              v-for="(note, index) in patient.notes"
+              :key="index"
+              :class="[
+                'rounded-md px-2 py-1.5',
+                note.kind === 'next_visit'
+                  ? 'border border-amber-500/30 bg-amber-500/[0.08] light:bg-amber-50 light:border-amber-200'
+                  : 'bg-white/[0.05] light:bg-gray-100'
+              ]"
+            >
+              <p dir="auto" class="break-words">{{ note.text }}</p>
+              <p class="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-muted-foreground">
+                <span v-if="note.kind === 'next_visit'" class="font-medium text-amber-300 light:text-amber-700">{{ t('clinic.forNextVisit') }}</span>
+                <span v-if="note.by">{{ note.by }}</span>
+                <span v-if="note.at">{{ formatDay(note.at.slice(0, 10)) }}</span>
+              </p>
+            </div>
           </section>
         </template>
 

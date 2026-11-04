@@ -2707,6 +2707,7 @@
     "tasks": "Tasks",
     "openTasks": "{count} open",
     "frontDeskNotes": "Notes",
+    "forNextVisit": "For next visit",
     "notRegisteredHint": "Nobody in the clinic system uses {phone}.",
     "movingFrom": "Now:",
     "doctor": "Doctor",
