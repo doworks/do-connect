@@ -25,6 +25,7 @@ const (
 	ContextKeyUser           = "user"
 	ContextKeyOrganization   = "organization"
 	ContextKeyViaAPIKey      = "via_api_key"
+	ContextKeyDeviceID       = "device_id"
 )
 
 // JWTClaims represents JWT claims
@@ -34,6 +35,9 @@ type JWTClaims struct {
 	Email          string     `json:"email"`
 	RoleID         *uuid.UUID `json:"role_id,omitempty"`
 	IsSuperAdmin   bool       `json:"is_super_admin"`
+	// DeviceID is set on access tokens issued to a signed-in phone. Such a
+	// token stops working as soon as the phone is removed or its user disabled.
+	DeviceID *uuid.UUID `json:"device_id,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -180,6 +184,19 @@ func AuthWithDB(secret string, db *gorm.DB) fastglue.FastMiddleware {
 			return nil
 		}
 
+		if claims.DeviceID != nil {
+			active, err := mobileDeviceActive(db, *claims.DeviceID, claims.UserID)
+			if err != nil {
+				_ = r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Could not verify device", nil, "")
+				return nil
+			}
+			if !active {
+				_ = r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Device has been signed out", nil, "")
+				return nil
+			}
+			r.RequestCtx.SetUserValue(ContextKeyDeviceID, *claims.DeviceID)
+		}
+
 		// Store claims in context
 		r.RequestCtx.SetUserValue(ContextKeyUserID, claims.UserID)
 		r.RequestCtx.SetUserValue(ContextKeyOrganizationID, claims.OrganizationID)
@@ -191,6 +208,30 @@ func AuthWithDB(secret string, db *gorm.DB) fastglue.FastMiddleware {
 
 		return r
 	}
+}
+
+// mobileDeviceActive reports whether a phone's access token may still be used:
+// the device exists, has not been removed, and its user is active. Without a
+// database the answer is always no, so device tokens fail closed.
+func mobileDeviceActive(db *gorm.DB, deviceID, userID uuid.UUID) (bool, error) {
+	if db == nil {
+		return false, nil
+	}
+	var count int64
+	err := db.Model(&models.MobileDevice{}).
+		Joins("JOIN users ON users.id = mobile_devices.user_id AND users.deleted_at IS NULL AND users.is_active = ?", true).
+		Where("mobile_devices.id = ? AND mobile_devices.user_id = ? AND mobile_devices.revoked_at IS NULL", deviceID, userID).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// GetDeviceID returns the signed-in phone behind the request, if any.
+func GetDeviceID(r *fastglue.Request) (uuid.UUID, bool) {
+	id, ok := r.RequestCtx.UserValue(ContextKeyDeviceID).(uuid.UUID)
+	return id, ok
 }
 
 // validateAPIKey validates an API key and sets context values

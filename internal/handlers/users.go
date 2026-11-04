@@ -535,6 +535,9 @@ func (a *App) UpdateUser(r *fastglue.Request) error {
 		a.Log.Error("Failed to update user", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update user", nil, "")
 	}
+	if !user.IsActive {
+		a.revokeMobileDevices(user.ID, uuid.Nil, currentUserID)
+	}
 
 	// Invalidate permissions cache if role changed
 	if roleChanged {
@@ -605,6 +608,7 @@ func (a *App) DeleteUser(r *fastglue.Request) error {
 			return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to remove member", nil, "")
 		}
 		a.InvalidateUserPermissionsCache(id)
+		a.revokeMobileDevices(id, orgID, currentUserID)
 
 		a.logAudit(orgID, currentUserID,
 			"user", id, models.AuditActionDeleted, userAuditSnapshot(&user), nil)
@@ -640,6 +644,7 @@ func (a *App) DeleteUser(r *fastglue.Request) error {
 
 	// Delete all UserOrganization entries for this user
 	a.DB.Where("user_id = ?", id).Delete(&models.UserOrganization{})
+	a.revokeMobileDevices(id, uuid.Nil, currentUserID)
 
 	a.logAudit(orgID, currentUserID,
 		"user", id, models.AuditActionDeleted, userAuditSnapshot(&user), nil)

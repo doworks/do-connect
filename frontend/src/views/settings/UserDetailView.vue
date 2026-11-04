@@ -11,6 +11,7 @@ import { useUnsavedChangesGuard } from '@/composables/useUnsavedChangesGuard'
 import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import MetadataPanel from '@/components/shared/MetadataPanel.vue'
 import AuditLogPanel from '@/components/shared/AuditLogPanel.vue'
+import SignedInPhones from '@/components/shared/SignedInPhones.vue'
 import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -285,6 +286,13 @@ onMounted(async () => {
           </div>
         </CardContent>
       </Card>
+
+      <!-- Phones signed in with the mobile app -->
+      <SignedInPhones
+        v-if="user"
+        :user-id="user.id"
+        :can-remove="canWrite || isSelf"
+      />
 
       <!-- Activity Log -->
       <AuditLogPanel

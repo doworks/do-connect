@@ -64,6 +64,7 @@ func GetMigrationModels() []MigrationModel {
 		{"Team", &models.Team{}},
 		{"TeamMember", &models.TeamMember{}},
 		{"APIKey", &models.APIKey{}},
+		{"MobileDevice", &models.MobileDevice{}},
 		{"SSOProvider", &models.SSOProvider{}},
 		{"Webhook", &models.Webhook{}},
 		{"WebhookDelivery", &models.WebhookDelivery{}},

@@ -11,6 +11,7 @@ import { User, Eye, EyeOff, Loader2 } from 'lucide-vue-next'
 import { usersService } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { PageHeader } from '@/components/shared'
+import SignedInPhones from '@/components/shared/SignedInPhones.vue'
 import { getErrorMessage } from '@/lib/api-utils'
 
 const { t } = useI18n()
@@ -95,6 +96,9 @@ async function changePassword() {
             </div>
           </CardContent>
         </Card>
+
+        <!-- Phones signed in with the mobile app -->
+        <SignedInPhones />
 
         <!-- Change Password -->
         <Card>

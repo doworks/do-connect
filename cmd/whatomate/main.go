@@ -495,12 +495,21 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		g.POST("/api/auth/refresh", withRateLimit(app.RefreshToken, middleware.RateLimitOpts{
 			Redis: rdb, Log: lo, Max: cfg.RateLimit.RefreshMaxAttempts, Window: window, KeyPrefix: "refresh", TrustProxy: cfg.RateLimit.TrustProxy,
 		}))
+		g.POST("/api/mobile/login", withRateLimit(app.MobileLogin, middleware.RateLimitOpts{
+			Redis: rdb, Log: lo, Max: cfg.RateLimit.LoginMaxAttempts, Window: window, KeyPrefix: "mobile_login", TrustProxy: cfg.RateLimit.TrustProxy,
+		}))
+		g.POST("/api/mobile/refresh", withRateLimit(app.MobileRefresh, middleware.RateLimitOpts{
+			Redis: rdb, Log: lo, Max: cfg.RateLimit.RefreshMaxAttempts, Window: window, KeyPrefix: "mobile_refresh", TrustProxy: cfg.RateLimit.TrustProxy,
+		}))
 	} else {
 		g.POST("/api/auth/login", app.Login)
 		g.POST("/api/auth/register", app.Register)
 		g.POST("/api/auth/refresh", app.RefreshToken)
+		g.POST("/api/mobile/login", app.MobileLogin)
+		g.POST("/api/mobile/refresh", app.MobileRefresh)
 	}
 	g.POST("/api/auth/logout", app.Logout)
+	g.POST("/api/mobile/logout", app.MobileLogout)
 	g.POST("/api/auth/switch-org", app.SwitchOrg)
 	g.GET("/api/auth/ws-token", app.GetWSToken)
 
@@ -537,7 +546,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		// Skip auth for public routes
 		if path == "/health" || path == "/ready" ||
 			path == "/api/auth/login" || path == "/api/auth/register" || path == "/api/auth/refresh" ||
-			path == "/api/auth/logout" || path == "/api/webhook" || path == "/ws" {
+			path == "/api/auth/logout" || path == "/api/webhook" || path == "/ws" ||
+			path == "/api/mobile/login" || path == "/api/mobile/refresh" || path == "/api/mobile/logout" {
 			return r
 		}
 		// Skip auth for SSO routes (they handle their own auth via state tokens)
@@ -603,6 +613,11 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/me/password", app.ChangePassword)
 	g.PUT("/api/me/availability", app.UpdateAvailability)
 	g.GET("/api/me/organizations", app.ListMyOrganizations)
+
+	// Signed-in phones
+	g.GET("/api/mobile/devices", app.ListMobileDevices)
+	g.DELETE("/api/mobile/devices/{id}", app.DeleteMobileDevice)
+	g.PUT("/api/mobile/push-token", app.UpdateMobilePushToken)
 
 	// User Management (admin only - enforced by middleware)
 	g.GET("/api/users", app.ListUsers)

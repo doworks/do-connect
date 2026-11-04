@@ -154,6 +154,26 @@ export const authService = {
   getWSToken: () => api.get('/auth/ws-token'),
 }
 
+export interface MobileDevice {
+  id: string
+  user_id: string
+  user_name?: string
+  user_email?: string
+  name: string
+  model: string
+  platform: string
+  app_version: string
+  push_enabled: boolean
+  current: boolean
+  created_at: string
+  last_seen_at: string
+}
+
+export const mobileDevicesService = {
+  list: (params?: { scope?: 'mine'; user_id?: string }) => api.get('/mobile/devices', { params }),
+  remove: (id: string) => api.delete(`/mobile/devices/${id}`),
+}
+
 export const usersService = {
   list: (params?: { search?: string; page?: number; limit?: number; role_id?: string; online_only?: boolean }) =>
     api.get('/users', { params }),

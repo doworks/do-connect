@@ -291,6 +291,12 @@ func (a *App) RefreshToken(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Invalid token claims", nil, "")
 	}
 
+	// A phone's access token must not become a browser session that outlives
+	// the phone being signed out.
+	if claims.DeviceID != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Invalid refresh token", nil, "")
+	}
+
 	// Validate JTI in Redis (single-use: delete on consumption)
 	if claims.ID != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -352,12 +358,19 @@ func (a *App) RefreshToken(r *fastglue.Request) error {
 }
 
 func (a *App) generateAccessToken(user *models.User) (string, error) {
+	return a.signAccessToken(user, nil)
+}
+
+// signAccessToken issues a short-lived access token. deviceID ties it to a
+// signed-in phone, which the auth middleware checks on every request.
+func (a *App) signAccessToken(user *models.User, deviceID *uuid.UUID) (string, error) {
 	claims := middleware.JWTClaims{
 		UserID:         user.ID,
 		OrganizationID: user.OrganizationID,
 		Email:          user.Email,
 		RoleID:         user.RoleID,
 		IsSuperAdmin:   user.IsSuperAdmin,
+		DeviceID:       deviceID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(a.Config.JWT.AccessExpiryMins) * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -418,6 +431,11 @@ func (a *App) SwitchOrg(r *fastglue.Request) error {
 	userID, ok := r.RequestCtx.UserValue("user_id").(uuid.UUID)
 	if !ok {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
+	}
+	// Switching issues browser cookies with their own refresh token, which
+	// would outlive the phone being signed out.
+	if _, onPhone := middleware.GetDeviceID(r); onPhone {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Switching organization is not available on a phone session", nil, "")
 	}
 
 	var req SwitchOrgRequest

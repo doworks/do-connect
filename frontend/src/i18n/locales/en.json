@@ -1356,6 +1356,18 @@
     "passwordChanged": "Password changed successfully",
     "passwordChangeFailed": "Failed to change password"
   },
+  "phones": {
+    "title": "Signed-in phones",
+    "description": "Phones signed in with the mobile app. Removing a phone signs it out straight away.",
+    "none": "No phones are signed in.",
+    "lastSeen": "Last active {time}",
+    "signedIn": "signed in {time}",
+    "notifications": "Notifications on",
+    "removeTitle": "Remove this phone?",
+    "removeDescription": "{name} will be signed out and must sign in again to be used.",
+    "removed": "Phone signed out",
+    "removeFailed": "Could not remove the phone"
+  },
   "accounts": {
     "metaConnectionDetails": "Details",
     "verifiedName": "Verified Name",
