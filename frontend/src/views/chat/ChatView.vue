@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
 import { useTransfersStore } from '@/stores/transfers'
 import { wsService } from '@/services/websocket'
-import { contactsService, chatbotService, messagesService, customActionsService, accountsService, cannedResponsesService, organizationService, getRequestHeaders, type CustomAction, type ActionResult, type CannedResponse } from '@/services/api'
+import { contactsService, chatbotService, messagesService, customActionsService, accountsService, cannedResponsesService, getRequestHeaders, type CustomAction, type ActionResult, type CannedResponse } from '@/services/api'
 import { useTagsStore } from '@/stores/tags'
 import { TagBadge } from '@/components/ui/tag-badge'
 import { getTagColorClass } from '@/lib/constants'
@@ -75,8 +75,6 @@ import {
   UserX,
   Play,
   Reply,
-  Forward,
-  FolderInput,
   X,
   SmilePlus,
   MapPin,
@@ -91,26 +89,26 @@ import {
   Code,
   RotateCw,
   Filter,
-  StickyNote,
-  CalendarClock,
-  Hourglass,
-  Bot,
-  MailWarning,
-  MailOpen,
-  MessageCirclePlus,
-  UserCheck
+  StickyNote
 } from 'lucide-vue-next'
 import { getInitials, getAvatarGradient } from '@/lib/utils'
-import { normalizePhone, formatPhone, phoneDigits } from '@/lib/phone'
-import { lateArrivalAt } from '@/lib/messageTime'
 import { useColorMode } from '@/composables/useColorMode'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
 import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
 import PreviewButtonGroup from '@/components/chatbot/flow-preview/PreviewButtonGroup.vue'
 import TemplatePicker from '@/components/chat/TemplatePicker.vue'
 import MediaViewerDialog from '@/components/chat/MediaViewerDialog.vue'
-import PatientPanel from '@/components/chat/PatientPanel.vue'
-import PatientStrip from '@/components/chat/PatientStrip.vue'
+// Our additions live in their own components and composables, so this upstream file changes little.
+import {
+  PatientPanel, PatientStrip, ContactFilterTabs, ContactRowBody, ContactListEmpty,
+} from '@/components/chat/chatExtras'
+import { Hourglass, Forward, FolderInput, CalendarClock, Bot, MailWarning, UserCheck } from 'lucide-vue-next'
+import { contactTitle, contactLanguage, senderColor, senderName, isAutomatedSender, firstName, assigneeName } from '@/lib/chatDisplay'
+import { formatPhone } from '@/lib/phone'
+import { lateArrivalAt } from '@/lib/messageTime'
+import { provideChatSettings } from '@/composables/useChatSettings'
+import { useContactActions } from '@/composables/useContactActions'
+import { useUnreadTabTitle, askNotificationPermissionOnClick } from '@/composables/useChatAttention'
 import ForwardDialog from '@/components/chat/ForwardDialog.vue'
 import SaveToFileDialog from '@/components/chat/SaveToFileDialog.vue'
 import { useClinicStore } from '@/stores/clinic'
@@ -242,6 +240,9 @@ const isServiceWindowExpired = computed(() => {
   return contact.service_window_open === false
 })
 
+const chatSettings = provideChatSettings()
+const defaultCountryCode = chatSettings.defaultCountryCode
+const holdsMessages = computed(() => isServiceWindowExpired.value && chatSettings.canHoldMessages.value)
 const clinic = useClinicStore()
 const patientPanelView = ref('overview')
 const isPatientPanelOpen = ref(false)
@@ -264,137 +265,8 @@ function useDraft(text: string) {
   })
 }
 
-// Numbers staff type without a country code get this one (Settings, General).
-const defaultCountryCode = ref('')
-// Messages can wait for the patient only once an unlock template is set up.
-const canHoldMessages = ref(false)
-const holdsMessages = computed(() => isServiceWindowExpired.value && canHoldMessages.value)
-
-// Frappe starts a contact's name with the language to reply in ("AR · Sara").
-const LANGUAGE_PREFIX = /^(AR|EN) · /
-
-function contactLanguage(contact: Contact): string {
-  const prefix = (contact.name || '').match(LANGUAGE_PREFIX)
-  if (prefix) return prefix[1]
-  if (contact.tags?.includes('Arabic')) return 'AR'
-  if (contact.tags?.includes('English')) return 'EN'
-  return ''
-}
-
-function contactTitle(contact: Contact): string {
-  return (contact.name || contact.phone_number).replace(LANGUAGE_PREFIX, '')
-}
-
-const SENDER_COLORS = [
-  'text-sky-200 light:text-sky-700',
-  'text-amber-200 light:text-amber-700',
-  'text-pink-200 light:text-pink-700',
-  'text-violet-200 light:text-violet-700',
-  'text-cyan-200 light:text-cyan-700',
-  'text-orange-200 light:text-orange-700',
-  'text-rose-200 light:text-rose-700',
-  'text-yellow-200 light:text-yellow-700',
-]
-
-const SENDER_DOTS = ['bg-sky-500', 'bg-amber-500', 'bg-pink-500', 'bg-violet-500', 'bg-cyan-500', 'bg-orange-500', 'bg-rose-500', 'bg-yellow-500']
-
-function senderIndex(name: string): number {
-  let hash = 2166136261
-  for (let i = 0; i < name.length; i++) hash = Math.imul(hash ^ name.charCodeAt(i), 16777619)
-  return Math.abs(hash) % SENDER_COLORS.length
-}
-
-function senderColor(name: string): string {
-  return SENDER_COLORS[senderIndex(name)]
-}
-
-function senderDot(name: string): string {
-  return SENDER_DOTS[senderIndex(name)]
-}
-
-function senderName(message: Message): string {
-  if (message.direction !== 'outgoing') return ''
-  return message.sent_by_label || message.sent_by_name || ''
-}
-
-function isAutomatedSender(message: Message): boolean {
-  return !!message.sent_by_label
-}
-
-function firstName(name: string): string {
-  return (name || '').split(' ')[0]
-}
-
-function formatWaiting(since?: string): string {
-  if (!since) return ''
-  const minutes = Math.max(1, Math.floor((Date.now() - new Date(since).getTime()) / 60000))
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h`
-  return `${Math.floor(hours / 24)}d`
-}
-
-function assigneeName(contact: Contact): string {
-  return contact.assigned_user_name || ''
-}
-
-// Unread chats show in the browser tab, for staff working in another tab.
-const baseTitle = document.title
-watch(() => contactsStore.contacts.reduce((sum, contact) => sum + (contact.unread_count > 0 ? 1 : 0), 0), (count) => {
-  document.title = count > 0 ? `(${count}) ${baseTitle}` : baseTitle
-}, { immediate: true })
-onUnmounted(() => { document.title = baseTitle })
-
-const filterTabs = computed(() => {
-  const counts = contactsStore.filterCounts
-  return [
-    { key: 'all', label: t('chat.filterAll'), count: 0 },
-    { key: 'unread', label: t('chat.filterUnread'), count: counts.unread || 0 },
-    { key: 'waiting', label: t('chat.filterWaiting'), count: counts.waiting || 0 },
-    { key: 'mine', label: t('chat.filterMine'), count: counts.mine || 0 },
-    { key: 'unassigned', label: t('chat.filterUnassigned'), count: counts.unassigned || 0 },
-  ]
-})
-
-const searchedNumber = computed(() => normalizePhone(contactsStore.searchQuery, defaultCountryCode.value))
-const searchedNumberLabel = computed(() => formatPhone(searchedNumber.value, defaultCountryCode.value))
-const searchLooksLikePhone = computed(() => !!phoneDigits(contactsStore.searchQuery))
-const isStartingChat = ref(false)
-
-async function startChatWithNumber() {
-  if (!searchedNumber.value || isStartingChat.value) return
-  isStartingChat.value = true
-  try {
-    const response = await contactsService.create({ phone_number: searchedNumber.value, open_existing: true })
-    const contact = response.data.data || response.data
-    contactsStore.searchQuery = ''
-    await contactsStore.fetchContacts()
-    if (contact?.id) router.push({ name: 'chat-conversation', params: { contactId: contact.id } })
-  } catch (error) {
-    toast.error(getErrorMessage(error, t('chat.startChatFailed')))
-  } finally {
-    isStartingChat.value = false
-  }
-}
-
-async function markContactUnread(contact: Contact) {
-  try {
-    await contactsService.markUnread(contact.id)
-    contactsStore.markContactUnread(contact.id)
-    if (contactsStore.currentContact?.id === contact.id) router.push({ name: 'chat-conversation' })
-  } catch (error) {
-    toast.error(getErrorMessage(error, t('chat.markUnreadFailed')))
-  }
-}
-
-async function markContactReadFromList(contact: Contact) {
-  try {
-    await contactsService.markRead(contact.id)
-    contactsStore.markContactRead(contact.id)
-  } catch (error) {
-    toast.error(getErrorMessage(error, t('chat.markUnreadFailed')))
-  }
-}
+const { markContactUnread } = useContactActions()
+useUnreadTabTitle()
 
 const heldMessages = computed(() => contactsStore.messages.filter(m => m.status === 'held'))
 const infoMessage = ref<Message | null>(null)
@@ -630,18 +502,8 @@ onMounted(async () => {
 
   await contactsStore.fetchContacts()
 
-  // Browsers only allow this question after a click.
-  if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-    document.addEventListener('click', () => { Notification.requestPermission() }, { once: true })
-  }
-
-  organizationService.getSettings()
-    .then(response => {
-      const settings = response.data.data?.settings || {}
-      defaultCountryCode.value = settings.default_country_code || ''
-      canHoldMessages.value = !!(settings.unlock_template_en || settings.unlock_template_ar)
-    })
-    .catch(() => { /* typed numbers then need their country code */ })
+  askNotificationPermissionOnClick()
+  chatSettings.load()
 
   // Setup infinite scroll for contacts list
   await nextTick()
@@ -2131,34 +1993,7 @@ async function sendMediaMessage() {
         </div>
       </div>
 
-      <!-- Worklist filters -->
-      <div class="flex flex-wrap items-center gap-0.5 px-2 py-1.5 border-b border-white/[0.08] light:border-gray-200">
-        <button
-          v-for="tab in filterTabs"
-          :key="tab.key"
-          type="button"
-          :class="[
-            'shrink-0 inline-flex items-center gap-1 h-6 px-1.5 rounded-full text-[11px] font-medium transition-colors',
-            contactsStore.listFilter === tab.key
-              ? 'bg-emerald-600 text-white'
-              : 'bg-white/[0.06] text-white/60 hover:bg-white/[0.1] light:bg-gray-100 light:text-gray-600 light:hover:bg-gray-200'
-          ]"
-          @click="contactsStore.setListFilter(tab.key)"
-        >
-          {{ tab.label }}
-          <span
-            v-if="tab.count > 0"
-            :class="[
-              'min-w-[14px] h-4 px-0.5 rounded-full text-[10px] leading-4 text-center',
-              contactsStore.listFilter === tab.key
-                ? 'bg-white/25 text-white'
-                : tab.key === 'unread' ? 'bg-emerald-500/20 text-emerald-400 light:bg-emerald-100 light:text-emerald-700'
-                : tab.key === 'waiting' ? 'bg-amber-500/20 text-amber-400 light:bg-amber-100 light:text-amber-700'
-                : 'bg-white/[0.1] text-white/60 light:bg-gray-200 light:text-gray-600'
-            ]"
-          >{{ tab.count }}</span>
-        </button>
-      </div>
+      <ContactFilterTabs />
 
       <!-- Contacts -->
       <ScrollArea :ref="(el: any) => contactsScroll.scrollAreaRef.value = el" orientation="vertical" class="flex-1">
@@ -2178,91 +2013,7 @@ async function sendMediaMessage() {
                 {{ getInitials(contactTitle(contact)) }}
               </AvatarFallback>
             </Avatar>
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center justify-between gap-2">
-                <div class="flex-1 min-w-0 flex items-center gap-1.5">
-                  <p
-                    :class="[
-                      'min-w-0 text-sm truncate text-white light:text-gray-900',
-                      contact.unread_count > 0 ? 'font-semibold' : 'font-medium'
-                    ]"
-                    :title="contactTitle(contact)"
-                    dir="auto"
-                  >
-                    {{ contactTitle(contact) }}
-                  </p>
-                  <span
-                    v-if="contactLanguage(contact)"
-                    :class="[
-                      'shrink-0 h-4 px-1 rounded text-[9px] leading-4 font-bold tracking-wide',
-                      contactLanguage(contact) === 'AR'
-                        ? 'bg-violet-500/20 text-violet-300 light:bg-violet-100 light:text-violet-700'
-                        : 'bg-sky-500/20 text-sky-300 light:bg-sky-100 light:text-sky-700'
-                    ]"
-                  >{{ contactLanguage(contact) }}</span>
-                </div>
-                <span
-                  :class="[
-                    'flex-shrink-0 text-[11px] group-hover:hidden',
-                    contact.unread_count > 0 ? 'text-emerald-400 light:text-emerald-600 font-medium' : 'text-white/40 light:text-gray-500'
-                  ]"
-                >
-                  {{ formatContactTime(contact.last_message_at) }}
-                </span>
-                <DropdownMenu>
-                  <DropdownMenuTrigger as-child>
-                    <button
-                      type="button"
-                      :aria-label="$t('chat.chatOptions')"
-                      class="flex flex-shrink-0 h-4 w-0 opacity-0 overflow-hidden group-hover:w-4 group-hover:opacity-100 data-[state=open]:w-4 data-[state=open]:opacity-100 items-center justify-center rounded text-white/60 hover:text-white light:text-gray-500 light:hover:text-gray-900"
-                      @click.stop
-                    >
-                      <MoreVertical class="h-3.5 w-3.5" />
-                    </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" @click.stop>
-                    <DropdownMenuItem v-if="contact.unread_count === 0" @click="markContactUnread(contact)">
-                      <MailWarning class="mr-2 h-4 w-4" />
-                      <span>{{ $t('chat.markAsUnread') }}</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem v-else @click="markContactReadFromList(contact)">
-                      <MailOpen class="mr-2 h-4 w-4" />
-                      <span>{{ $t('chat.markAsRead') }}</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-              <div class="flex items-center justify-between gap-2">
-                <p
-                  :class="[
-                    'flex-1 min-w-0 text-xs truncate',
-                    contact.last_send_failed ? 'text-red-400 light:text-red-600' : contact.unread_count > 0 ? 'text-white/75 light:text-gray-800' : 'text-white/50 light:text-gray-500'
-                  ]"
-                >
-                  <AlertCircle v-if="contact.last_send_failed" class="inline h-3 w-3 -mt-0.5 mr-0.5" />
-                  <span v-else-if="contact.last_message_direction === 'outgoing' && contact.last_reply_by" :class="['font-medium', senderColor(contact.last_reply_by)]">{{ firstName(contact.last_reply_by) }}: </span>
-                  <span v-if="contact.last_send_failed">{{ $t('chat.notDelivered') }}: </span>
-                  <span dir="auto">{{ contact.last_message_preview || contact.phone_number }}</span>
-                </p>
-                <Badge v-if="contact.unread_count > 0" class="flex-shrink-0 h-5 text-[10px] bg-emerald-500/20 text-emerald-400 light:bg-emerald-100 light:text-emerald-700">
-                  {{ contact.marked_unread ? '•' : contact.unread_count }}
-                </Badge>
-                <span
-                  v-else-if="contact.waiting_since"
-                  class="flex-shrink-0 inline-flex items-center gap-0.5 h-5 px-1.5 rounded-full text-[10px] font-medium bg-amber-500/15 text-amber-400 light:bg-amber-100 light:text-amber-700"
-                  :title="$t('chat.waitingForReply')"
-                >
-                  <Clock class="h-2.5 w-2.5" />{{ formatWaiting(contact.waiting_since) }}
-                </span>
-              </div>
-              <div class="flex items-center gap-1.5 mt-0.5 text-[11px] text-white/40 light:text-gray-500">
-                <span class="truncate">{{ formatPhone(contact.phone_number, defaultCountryCode) }}</span>
-                <span v-if="assigneeName(contact)" class="shrink-0 inline-flex items-center gap-1 ml-auto">
-                  <span :class="['h-1.5 w-1.5 rounded-full', senderDot(assigneeName(contact))]" />
-                  {{ firstName(assigneeName(contact)) }}
-                </span>
-              </div>
-            </div>
+            <ContactRowBody :contact="contact" :time="formatContactTime(contact.last_message_at)" />
           </div>
 
           <!-- Loading indicator for infinite scroll -->
@@ -2270,25 +2021,7 @@ async function sendMediaMessage() {
             <Loader2 class="h-5 w-5 mx-auto animate-spin text-white/40 light:text-gray-400" />
           </div>
 
-          <div v-if="contactsStore.sortedContacts.length === 0 && searchedNumber" class="p-3">
-            <div class="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] light:bg-emerald-50 light:border-emerald-200 p-3 text-center">
-              <p class="text-xs text-white/60 light:text-gray-600">{{ $t('chat.noContactForNumber') }}</p>
-              <Button
-                size="sm"
-                class="w-full mt-2 bg-emerald-600 hover:bg-emerald-500 text-white"
-                :disabled="isStartingChat"
-                @click="startChatWithNumber"
-              >
-                <Loader2 v-if="isStartingChat" class="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                <MessageCirclePlus v-else class="h-3.5 w-3.5 mr-1.5" />
-                <span dir="ltr">{{ $t('chat.messageNumber', { number: searchedNumberLabel }) }}</span>
-              </Button>
-            </div>
-          </div>
-          <div v-else-if="contactsStore.sortedContacts.length === 0" class="p-3 text-center text-white/40 light:text-gray-500">
-            <User class="h-6 w-6 mx-auto mb-1.5 opacity-50" />
-            <p class="text-sm">{{ searchLooksLikePhone ? $t('chat.typeFullNumber') : $t('chat.noContacts') }}</p>
-          </div>
+          <ContactListEmpty v-if="contactsStore.sortedContacts.length === 0" />
         </div>
       </ScrollArea>
     </div>
