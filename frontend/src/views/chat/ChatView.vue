@@ -1855,7 +1855,7 @@ async function sendMediaMessage() {
     </div>
 
     <!-- Chat Area -->
-    <div class="flex-1 flex flex-col bg-[#0f0f10] light:bg-gray-50">
+    <div class="flex-1 min-w-0 flex flex-col bg-[#0f0f10] light:bg-gray-50">
       <!-- No Contact Selected -->
       <div
         v-if="!contactsStore.currentContact"
