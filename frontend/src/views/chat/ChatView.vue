@@ -1329,7 +1329,10 @@ function formatContactTime(dateStr?: string) {
   if (!dateStr) return ''
   const date = new Date(dateStr)
   const now = new Date()
-  const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000)
+  // Compare calendar days, not 24-hour periods: a message from 23:50 last
+  // night is "Yesterday" at 00:05, not today.
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86400000)
 
   if (diffDays === 0) {
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
