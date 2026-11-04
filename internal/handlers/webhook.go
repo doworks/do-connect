@@ -170,31 +170,39 @@ func (a *App) WebhookHandler(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid payload", nil, "")
 	}
 
-	// Verify webhook signature before processing any fields. A number with an App
-	// Secret only accepts signed events, so nobody can post fake patient messages.
-	// A number without one can't be verified, which the account page warns about.
-	// A refused event is kept, so an admin can see it and accept it if it's real.
+	// Verify webhook signature before processing any fields. Every change is
+	// checked against its own account's App Secret (template status updates
+	// carry no phone number, so their WABA's accounts are used), so nobody can
+	// post fake patient messages or statuses. A number without an App Secret
+	// can't be verified, which the account page warns about. A refused event is
+	// kept, so an admin can see it and accept it if it's real.
 	for _, entry := range payload.Entry {
 		for _, change := range entry.Changes {
 			phoneNumberID := change.Value.Metadata.PhoneNumberID
-			if phoneNumberID == "" {
+			accounts := a.webhookSigningAccounts(entry.ID, phoneNumberID)
+			if len(accounts) == 0 {
 				continue
 			}
-			account, err := a.getWhatsAppAccountCached(phoneNumberID)
-			if err != nil || account.AppSecret == "" {
-				continue
+			verified := false
+			for _, account := range accounts {
+				if verifyWebhookSignature(body, signature, []byte(account.AppSecret)) {
+					verified = true
+					break
+				}
 			}
-			if !verifyWebhookSignature(body, signature, []byte(account.AppSecret)) {
+			if !verified {
 				reason := refusedWrongSignature
 				if len(signature) == 0 {
 					reason = refusedMissingSignature
 				}
-				a.Log.Warn("Invalid or missing webhook signature", "phone_id", phoneNumberID, "reason", reason)
-				a.saveRefusedWebhook(account, phoneNumberID, reason, body, &payload)
+				a.Log.Warn("Invalid or missing webhook signature", "phone_id", phoneNumberID, "waba_id", entry.ID, "reason", reason)
+				refusedFor := phoneNumberID
+				if refusedFor == "" {
+					refusedFor = accounts[0].PhoneID
+				}
+				a.saveRefusedWebhook(accounts[0], refusedFor, reason, body, &payload)
 				return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Invalid signature", nil, "")
 			}
-			a.Log.Debug("Webhook signature verified successfully")
-			break
 		}
 	}
 
@@ -595,6 +603,35 @@ func (a *App) processTemplateStatusUpdate(wabaID, event, templateName, templateL
 			)
 		}
 	}
+}
+
+// webhookSigningAccounts returns the accounts whose App Secret a webhook change
+// must be signed with. A change with a phone number ID belongs to that account;
+// others, such as template status updates, belong to the accounts of the WABA in
+// the entry. Empty means no secret is set and the change can't be verified.
+func (a *App) webhookSigningAccounts(wabaID, phoneNumberID string) []*models.WhatsAppAccount {
+	if phoneNumberID != "" {
+		account, err := a.getWhatsAppAccountCached(phoneNumberID)
+		if err != nil || account.AppSecret == "" {
+			return nil
+		}
+		return []*models.WhatsAppAccount{account}
+	}
+	if wabaID == "" {
+		return nil
+	}
+	var accounts []models.WhatsAppAccount
+	if err := a.DB.Where("business_id = ? AND app_secret <> ''", wabaID).Find(&accounts).Error; err != nil {
+		return nil
+	}
+	out := make([]*models.WhatsAppAccount, 0, len(accounts))
+	for i := range accounts {
+		a.decryptAccountSecrets(&accounts[i])
+		if accounts[i].AppSecret != "" {
+			out = append(out, &accounts[i])
+		}
+	}
+	return out
 }
 
 // verifyWebhookSignature verifies the X-Hub-Signature-256 header from Meta.
