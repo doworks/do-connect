@@ -101,16 +101,16 @@ import MediaViewerDialog from '@/components/chat/MediaViewerDialog.vue'
 // Our additions live in their own components and composables, so this upstream file changes little.
 import {
   PatientPanel, PatientStrip, ContactFilterTabs, ContactRowBody, ContactListEmpty, ChatHeaderChips, ContactSubtitle,
-  ContactMenuItems,
+  ContactMenuItems, NewBelowPill, ClinicEventLine, MessageLabels, MessageSender, MediaRetryButton, HeldNote,
+  MessageExtraActions, MessageToolDialogs,
 } from '@/components/chat/chatExtras'
-import { Hourglass, Forward, FolderInput, CalendarClock, Bot } from 'lucide-vue-next'
-import { contactTitle, senderColor, senderName, isAutomatedSender } from '@/lib/chatDisplay'
-import { lateArrivalAt } from '@/lib/messageTime'
+import { Hourglass } from 'lucide-vue-next'
+import { contactTitle } from '@/lib/chatDisplay'
+import { latestArrival, isBefore, revealMessage } from '@/lib/lateMessages'
 import { provideChatSettings } from '@/composables/useChatSettings'
 import { useContactActions } from '@/composables/useContactActions'
-import { useUnreadTabTitle, askNotificationPermissionOnClick } from '@/composables/useChatAttention'
-import ForwardDialog from '@/components/chat/ForwardDialog.vue'
-import SaveToFileDialog from '@/components/chat/SaveToFileDialog.vue'
+import { useUnreadTabTitle, askNotificationPermissionOnClick, useNewBelowCount } from '@/composables/useChatAttention'
+import { provideMessageTools } from '@/composables/useMessageTools'
 import { useClinicStore } from '@/stores/clinic'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
 import ConversationNotes from '@/components/chat/ConversationNotes.vue'
@@ -148,9 +148,7 @@ const isResuming = ref(false)
 const newMessagesCount = ref(0)
 const firstUnreadId = ref<string | null>(null)
 const isAtBottom = ref(true)
-// Messages that arrived while scrolled up reading older ones.
-const newBelowCount = ref(0)
-watch(isAtBottom, (atBottom) => { if (atBottom) newBelowCount.value = 0 })
+const newBelowCount = useNewBelowCount(isAtBottom)
 const SCROLL_BOTTOM_THRESHOLD = 80
 const isInfoPanelOpen = ref(false)
 const isNotesPanelOpen = ref(false)
@@ -241,7 +239,6 @@ const isServiceWindowExpired = computed(() => {
 })
 
 const chatSettings = provideChatSettings()
-const defaultCountryCode = chatSettings.defaultCountryCode
 const holdsMessages = computed(() => isServiceWindowExpired.value && chatSettings.canHoldMessages.value)
 const clinic = useClinicStore()
 const patientPanelView = ref('overview')
@@ -269,22 +266,6 @@ const { assigneeFields } = useContactActions()
 useUnreadTabTitle()
 
 const heldMessages = computed(() => contactsStore.messages.filter(m => m.status === 'held'))
-const infoMessage = ref<Message | null>(null)
-
-function formatInfoTime(dateStr?: string): string {
-  if (!dateStr) return '—'
-  const date = new Date(dateStr)
-  return date.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
-}
-
-async function cancelHeldMessage(message: Message) {
-  try {
-    await messagesService.cancelHeld(message.contact_id, message.id)
-    contactsStore.removeMessage(message.id)
-  } catch (error) {
-    toast.error(getErrorMessage(error, t('chat.cancelHeldFailed')))
-  }
-}
 
 function openTemplatePicker() {
   const btn = templatePickerRef.value?.querySelector('button')
@@ -735,20 +716,14 @@ async function selectContact(id: string) {
 // is hidden races with the divider state.
 watch(() => contactsStore.messages.length, (newLen, oldLen) => {
   if (newLen <= oldLen) return
-  const last = contactsStore.messages[newLen - 1]
-  // A late message from the patient lands where they wrote it, above the end.
-  const added = contactsStore.messages.find(m => m.id === contactsStore.lastAddedId)
-  const latest = added || last
-  const landedAbove = !!added && added !== last
+  const { latest, landedAbove } = latestArrival(contactsStore.messages, contactsStore.lastAddedId)
   const isIncoming = latest?.direction === 'incoming'
   // "Not actively looking" covers both other-tab (hidden) and other-window
   // (visible but unfocused). The divider should pile in either case.
   const userAway = typeof document !== 'undefined'
     && (document.visibilityState === 'hidden' || !document.hasFocus())
   if (isIncoming && userAway) {
-    // The line goes above the earliest of them, which a late one can be.
-    const firstIndex = contactsStore.messages.findIndex(m => m.id === firstUnreadId.value)
-    if (newMessagesCount.value === 0 || contactsStore.messages.indexOf(latest) < firstIndex) {
+    if (newMessagesCount.value === 0 || isBefore(contactsStore.messages, latest, firstUnreadId.value)) {
       firstUnreadId.value = latest.id
     }
     newMessagesCount.value += 1
@@ -759,11 +734,7 @@ watch(() => contactsStore.messages.length, (newLen, oldLen) => {
     newMessagesCount.value = 0
     firstUnreadId.value = null
   }
-  if (landedAbove && isIncoming) {
-    // Staff are looking at the chat, so show it rather than leave it up there unseen.
-    nextTick(() => document.getElementById(`message-${latest.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
-    return
-  }
+  if (landedAbove && isIncoming) return revealMessage(latest)
   if (isAtBottom.value || !isIncoming) {
     scrollToBottom()
   } else {
@@ -825,22 +796,6 @@ async function sendMessage() {
 }
 
 const retryingMessageId = ref<string | null>(null)
-const retryingMediaId = ref<string | null>(null)
-
-async function retryMedia(message: Message) {
-  retryingMediaId.value = message.id
-  try {
-    const response = await messagesService.retryMedia(message.contact_id, message.id)
-    const index = contactsStore.messages.findIndex(m => m.id === message.id)
-    if (index !== -1) {
-      contactsStore.messages[index] = { ...contactsStore.messages[index], media_url: response.data.data.media_url, media_missing: false }
-    }
-  } catch (error) {
-    toast.error(getErrorMessage(error, t('chat.downloadFailed')))
-  } finally {
-    retryingMediaId.value = null
-  }
-}
 
 async function retryMessage(message: Message) {
   if (!contactsStore.currentContact || retryingMessageId.value) return
@@ -1320,41 +1275,7 @@ function _toggleReactionPicker(messageId: string) {
 }
 void _toggleReactionPicker // Suppress unused warning
 
-const forwardingMessage = ref<Message | null>(null)
-const isForwardOpen = ref(false)
-
-function canForward(message: Message): boolean {
-  if (message.status === 'held' || ['reaction', 'call'].includes(message.message_type)) return false
-  if (isMediaMessage(message)) return !!message.media_url
-  return !!getMessageContent(message)
-}
-
-function forwardMessage(message: Message) {
-  forwardingMessage.value = message
-  isForwardOpen.value = true
-}
-
-const savingMessage = ref<Message | null>(null)
-const isSaveToFileOpen = ref(false)
-
-function canSaveToFile(message: Message): boolean {
-  return !!clinic.context && isMediaMessage(message) && !!message.media_url && message.message_type !== 'sticker'
-}
-
-function saveToFile(message: Message) {
-  savingMessage.value = message
-  isSaveToFileOpen.value = true
-}
-
-function onSavedToFile(marker: { patient: string; patient_name?: string; kind: string; by_name: string; at: string }) {
-  if (savingMessage.value) savingMessage.value.saved_to_clinic = marker
-}
-
-const forwardPreview = computed(() => {
-  const message = forwardingMessage.value
-  if (!message) return ''
-  return getMessageContent(message) || `[${message.message_type}]`
-})
+provideMessageTools({ getMessageContent, isMediaMessage })
 
 function replyToMessage(message: Message) {
   contactsStore.setReplyingTo(message)
@@ -2203,14 +2124,7 @@ async function sendMediaMessage() {
 
         <!-- Messages -->
         <div class="relative flex-1 min-h-0 overflow-hidden" @dragover.prevent @drop.prevent="handleChatDrop">
-          <button
-            v-if="newBelowCount > 0"
-            type="button"
-            class="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 px-3 h-7 rounded-full text-xs font-medium shadow-md bg-emerald-600 text-white hover:bg-emerald-500"
-            @click="scrollToBottom(); newBelowCount = 0"
-          >
-            {{ $t('chat.newBelow', { count: newBelowCount }) }}
-          </button>
+          <NewBelowPill :count="newBelowCount" @click="scrollToBottom(); newBelowCount = 0" />
           <!-- Loading overlay while switching contacts / loading the first page -->
           <Spinner v-if="contactsStore.isLoadingMessages" overlay />
 
@@ -2259,14 +2173,7 @@ async function sendMediaMessage() {
                   </div>
                 </div>
 
-              <!-- Something that happened in the clinic system; the patient doesn't see these -->
-              <div v-if="message.message_type === 'event'" :id="`message-${message.id}`" class="flex justify-center my-1">
-                <span class="inline-flex items-center gap-1.5 max-w-[85%] px-2.5 py-1 rounded-md text-[11px] bg-indigo-500/15 text-indigo-200 light:bg-indigo-50 light:text-indigo-800">
-                  <CalendarClock class="h-3 w-3 shrink-0" />
-                  <span>{{ message.content?.body }} · {{ formatMessageTime(message.created_at) }}</span>
-                </span>
-              </div>
-
+              <ClinicEventLine v-if="message.message_type === 'event'" :id="`message-${message.id}`" :message="message" :time="formatMessageTime(message.created_at)" />
               <!-- Message bubble -->
               <div
                 v-else
@@ -2283,9 +2190,7 @@ async function sendMediaMessage() {
                   message.status === 'held' && 'chat-bubble-held'
                 ]"
               >
-
-                <div v-if="message.forwarded" class="flex items-center gap-1 text-[11px] italic text-muted-foreground mb-0.5"><Forward class="h-3 w-3" />{{ $t('chat.forwarded') }}</div>
-                <div v-if="message.saved_to_clinic" class="flex items-center gap-1 text-[11px] text-sky-400 light:text-sky-700 mb-0.5"><FolderInput class="h-3 w-3" />{{ $t('chat.savedToFileLabel', { kind: message.saved_to_clinic.kind, name: message.saved_to_clinic.by_name }) }}</div>
+                <MessageLabels :message="message" />
                 <!-- Reply preview (if this message is replying to another) -->
                 <div
                   v-if="message.is_reply && message.reply_to_message"
@@ -2459,22 +2364,13 @@ async function sendMediaMessage() {
                 <!-- Button reply - WhatsApp style -->
                 <div v-if="message.message_type === 'button_reply'" class="button-reply-bubble">
                   <span class="whitespace-pre-wrap break-words">{{ getMessageContent(message) }}</span>
-                  <span class="chat-bubble-time"><button v-if="senderName(message)" type="button" :class="['chat-bubble-sender', isAutomatedSender(message) ? '' : senderColor(senderName(message))]" @click="infoMessage = message"><Bot v-if="isAutomatedSender(message)" class="h-3 w-3" />{{ senderName(message) }}</button><span>{{ formatMessageTime(message.created_at) }}</span></span>
+                  <span class="chat-bubble-time"><MessageSender :message="message" /><span>{{ formatMessageTime(message.created_at) }}</span></span>
                 </div>
                 <!-- Text content (for text messages or captions) -->
-                <span v-else-if="getMessageContent(message)" class="block whitespace-pre-wrap break-words" dir="auto">{{ getMessageContent(message) }}<span class="chat-bubble-time"><button v-if="senderName(message)" type="button" :class="['chat-bubble-sender', isAutomatedSender(message) ? '' : senderColor(senderName(message))]" @click="infoMessage = message"><Bot v-if="isAutomatedSender(message)" class="h-3 w-3" />{{ senderName(message) }}</button><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing' && message.status !== 'held'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
-                <!-- A file that failed to download -->
-                <button
-                  v-if="message.media_missing && !message.media_url"
-                  type="button"
-                  class="block mb-1 text-xs font-medium underline text-amber-300 light:text-amber-700 disabled:opacity-50"
-                  :disabled="retryingMediaId === message.id"
-                  @click="retryMedia(message)"
-                >
-                  {{ $t('chat.downloadAgain') }}
-                </button>
+                <span v-else-if="getMessageContent(message)" class="block whitespace-pre-wrap break-words" dir="auto">{{ getMessageContent(message) }}<span class="chat-bubble-time"><MessageSender :message="message" /><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing' && message.status !== 'held'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
+                <MediaRetryButton v-if="message.media_missing && !message.media_url" :message="message" />
                 <!-- Fallback for media without URL -->
-                <span v-else-if="isMediaMessage(message) && !message.media_url" class="text-muted-foreground italic">[{{ message.message_type.charAt(0).toUpperCase() + message.message_type.slice(1) }}]<span class="chat-bubble-time"><button v-if="senderName(message)" type="button" :class="['chat-bubble-sender', isAutomatedSender(message) ? '' : senderColor(senderName(message))]" @click="infoMessage = message"><Bot v-if="isAutomatedSender(message)" class="h-3 w-3" />{{ senderName(message) }}</button><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
+                <span v-else-if="isMediaMessage(message) && !message.media_url" class="text-muted-foreground italic">[{{ message.message_type.charAt(0).toUpperCase() + message.message_type.slice(1) }}]<span class="chat-bubble-time"><MessageSender :message="message" /><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]" /></span></span>
                 <!-- Interactive buttons - WhatsApp style -->
                 <div
                   v-if="getInteractiveButtons(message).length > 0"
@@ -2554,12 +2450,7 @@ async function sendMediaMessage() {
                     {{ reaction.emoji }}
                   </span>
                 </div>
-                <!-- Held until the patient replies -->
-                <span v-if="message.status === 'held'" class="chat-bubble-held-note">
-                  <Hourglass class="h-3 w-3 shrink-0" />
-                  <span class="flex-1">{{ $t('chat.heldNote') }}</span>
-                  <button type="button" class="underline shrink-0" @click="cancelHeldMessage(message)">{{ $t('common.cancel') }}</button>
-                </span>
+                <HeldNote v-if="message.status === 'held'" :message="message" />
                 <!-- Failed message error (not for template messages) -->
                 <span
                   v-if="message.status === 'failed' && message.direction === 'outgoing' && message.message_type !== 'template'"
@@ -2606,36 +2497,7 @@ async function sendMediaMessage() {
                 >
                   <Reply class="h-3 w-3" />
                 </Button>
-                <Button
-                  v-if="lateArrivalAt(message)"
-                  variant="ghost"
-                  size="icon"
-                  class="h-6 w-6 text-amber-400 light:text-amber-600"
-                  :title="$t('chat.arrivedLate')"
-                  @click="infoMessage = message"
-                >
-                  <Info class="h-3 w-3" />
-                </Button>
-                <Button
-                  v-if="canForward(message)"
-                  variant="ghost"
-                  size="icon"
-                  class="h-6 w-6"
-                  :title="$t('chat.forward')"
-                  @click="forwardMessage(message)"
-                >
-                  <Forward class="h-3 w-3" />
-                </Button>
-                <Button
-                  v-if="canSaveToFile(message)"
-                  variant="ghost"
-                  size="icon"
-                  class="h-6 w-6"
-                  :title="$t('chat.saveToFile')"
-                  @click="saveToFile(message)"
-                >
-                  <FolderInput class="h-3 w-3" />
-                </Button>
+                <MessageExtraActions :message="message" />
               </div>
               <!-- Reply button for outgoing messages (shown on hover) -->
               <div v-if="message.direction === 'outgoing'" class="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity self-center ml-1">
@@ -2666,26 +2528,7 @@ async function sendMediaMessage() {
                 >
                   <Reply class="h-3 w-3" />
                 </Button>
-                <Button
-                  v-if="canForward(message)"
-                  variant="ghost"
-                  size="icon"
-                  class="h-6 w-6"
-                  :title="$t('chat.forward')"
-                  @click="forwardMessage(message)"
-                >
-                  <Forward class="h-3 w-3" />
-                </Button>
-                <Button
-                  v-if="canSaveToFile(message)"
-                  variant="ghost"
-                  size="icon"
-                  class="h-6 w-6"
-                  :title="$t('chat.saveToFile')"
-                  @click="saveToFile(message)"
-                >
-                  <FolderInput class="h-3 w-3" />
-                </Button>
+                <MessageExtraActions :message="message" />
                 <Button
                   v-if="message.status === 'failed' && message.message_type === 'text'"
                   variant="ghost"
@@ -2865,19 +2708,8 @@ async function sendMediaMessage() {
       @close="isNotesPanelOpen = false"
     />
 
+    <MessageToolDialogs />
     <!-- Patient details and clinic actions -->
-    <SaveToFileDialog
-      v-model:open="isSaveToFileOpen"
-      :message-id="savingMessage?.id || null"
-      :preview="savingMessage ? getMessageContent(savingMessage) : ''"
-      @saved="onSavedToFile"
-    />
-    <ForwardDialog
-      v-model:open="isForwardOpen"
-      :message-id="forwardingMessage?.id || null"
-      :preview="forwardPreview"
-      :default-country-code="defaultCountryCode"
-    />
     <PatientPanel
       v-if="contactsStore.currentContact && isPatientPanelOpen"
       v-model:view="patientPanelView"
@@ -2894,42 +2726,6 @@ async function sendMediaMessage() {
       @close="isInfoPanelOpen = false"
       @tags-updated="(tags) => contactsStore.updateContactTags(contactsStore.currentContact!.id, tags)"
     />
-
-    <!-- Message info -->
-    <Dialog :open="!!infoMessage" @update:open="(open) => !open && (infoMessage = null)">
-      <DialogContent class="max-w-xs">
-        <DialogHeader>
-          <DialogTitle class="text-sm">{{ $t('chat.messageInfo') }}</DialogTitle>
-        </DialogHeader>
-        <dl v-if="infoMessage" class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
-          <template v-if="infoMessage.direction === 'outgoing'">
-            <dt class="text-muted-foreground">{{ $t('chat.infoSentBy') }}</dt>
-            <dd class="font-medium">{{ senderName(infoMessage) || '—' }}</dd>
-          </template>
-          <template v-if="infoMessage.template_name">
-            <dt class="text-muted-foreground">{{ $t('chat.infoTemplate') }}</dt>
-            <dd class="break-all">{{ infoMessage.template_name }}</dd>
-          </template>
-          <dt class="text-muted-foreground">{{ $t('chat.infoSent') }}</dt>
-          <dd>{{ formatInfoTime(infoMessage.created_at) }}</dd>
-          <template v-if="infoMessage.direction === 'incoming'">
-            <template v-if="lateArrivalAt(infoMessage)">
-              <dt class="text-muted-foreground">{{ $t('chat.infoReceived') }}</dt>
-              <dd class="font-medium text-amber-400 light:text-amber-700">{{ formatInfoTime(lateArrivalAt(infoMessage)!) }}</dd>
-            </template>
-          </template>
-          <template v-else>
-            <dt class="text-muted-foreground">{{ $t('chat.infoDelivered') }}</dt>
-            <dd>{{ formatInfoTime(infoMessage.delivered_at) }}</dd>
-            <dt class="text-muted-foreground">{{ $t('chat.infoRead') }}</dt>
-            <dd>{{ formatInfoTime(infoMessage.read_at) }}</dd>
-          </template>
-        </dl>
-        <p v-if="infoMessage && lateArrivalAt(infoMessage)" class="text-[11px] text-muted-foreground">
-          {{ $t('chat.infoLateHint') }}
-        </p>
-      </DialogContent>
-    </Dialog>
 
     <!-- Template Params Dialog -->
     <Dialog v-model:open="templateDialogOpen">

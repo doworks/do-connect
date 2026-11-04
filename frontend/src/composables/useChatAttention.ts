@@ -1,4 +1,4 @@
-import { onUnmounted, watch } from 'vue'
+import { onUnmounted, ref, watch, type Ref } from 'vue'
 import { useContactsStore } from '@/stores/contacts'
 
 // Unread chats show in the browser tab, for staff working in another tab.
@@ -16,4 +16,11 @@ export function askNotificationPermissionOnClick() {
   if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
     document.addEventListener('click', () => { Notification.requestPermission() }, { once: true })
   }
+}
+
+// Messages that arrived while scrolled up reading older ones.
+export function useNewBelowCount(isAtBottom: Ref<boolean>): Ref<number> {
+  const newBelowCount = ref(0)
+  watch(isAtBottom, (atBottom) => { if (atBottom) newBelowCount.value = 0 })
+  return newBelowCount
 }
