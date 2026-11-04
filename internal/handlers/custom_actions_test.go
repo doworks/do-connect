@@ -3,6 +3,7 @@ package handlers_test
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -759,6 +760,47 @@ func TestApp_ExecuteCustomAction(t *testing.T) {
 
 		// Verify webhook received data
 		assert.NotEmpty(t, receivedBody)
+	})
+
+	t.Run("Webhook_ContactMetadataVariables", func(t *testing.T) {
+		t.Parallel()
+
+		var receivedPath, receivedBody string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			receivedPath = r.URL.Path
+			receivedBody = string(body)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		app := newTestApp(t, withHTTPClient(&http.Client{Timeout: 5 * time.Second}))
+		org := testutil.CreateTestOrganization(t, app.DB)
+		user := testutil.CreateTestUser(t, app.DB, org.ID)
+		contact := testutil.CreateTestContact(t, app.DB, org.ID)
+		require.NoError(t, app.DB.Model(contact).Update("metadata", models.JSONB{
+			"crm_id":  "C-42",
+			"address": map[string]any{"city": "Pune"},
+		}).Error)
+
+		action := createTestCustomAction(t, app, org.ID, "CRM Lookup", models.ActionTypeWebhook,
+			map[string]any{
+				"url":    server.URL + "/contacts/{{contact.metadata.crm_id}}",
+				"method": "POST",
+				"body":   `{"city":"{{contact.metadata.address.city}}","missing":"{{contact.metadata.nope}}"}`,
+			}, true, 0)
+
+		req := testutil.NewJSONRequest(t, map[string]any{
+			"contact_id": contact.ID.String(),
+		})
+		testutil.SetAuthContext(req, org.ID, user.ID)
+		testutil.SetPathParam(req, "id", action.ID.String())
+
+		require.NoError(t, app.ExecuteCustomAction(req))
+		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
+
+		assert.Equal(t, "/contacts/C-42", receivedPath)
+		assert.JSONEq(t, `{"city":"Pune","missing":""}`, receivedBody)
 	})
 
 	t.Run("Success_URL", func(t *testing.T) {
