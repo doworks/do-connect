@@ -102,7 +102,7 @@ import MediaViewerDialog from '@/components/chat/MediaViewerDialog.vue'
 import {
   PatientPanel, PatientStrip, ContactFilterTabs, ContactRowBody, ContactListEmpty, ChatHeaderChips, ContactSubtitle,
   ContactMenuItems, NewBelowPill, ClinicEventLine, MessageLabels, MessageSender, MediaRetryButton, HeldNote,
-  MessageExtraActions, MessageToolDialogs,
+  MessageExtraActions, ColleagueTyping, HeldBanner, ComposerSendButton, MessageToolDialogs, HeldMediaHint, MediaSendButton,
 } from '@/components/chat/chatExtras'
 import { Hourglass } from 'lucide-vue-next'
 import { contactTitle } from '@/lib/chatDisplay'
@@ -110,8 +110,10 @@ import { latestArrival, isBefore, revealMessage } from '@/lib/lateMessages'
 import { provideChatSettings } from '@/composables/useChatSettings'
 import { useContactActions } from '@/composables/useContactActions'
 import { useUnreadTabTitle, askNotificationPermissionOnClick, useNewBelowCount } from '@/composables/useChatAttention'
+import { useChatDrafts } from '@/composables/useChatDrafts'
+import { useTypingNotice, useFilePasteDrop } from '@/composables/useComposerEvents'
 import { provideMessageTools } from '@/composables/useMessageTools'
-import { useClinicStore } from '@/stores/clinic'
+import { usePatientPanel } from '@/composables/usePatientPanel'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
 import ConversationNotes from '@/components/chat/ConversationNotes.vue'
 import CallButton from '@/components/calling/CallButton.vue'
@@ -240,32 +242,10 @@ const isServiceWindowExpired = computed(() => {
 
 const chatSettings = provideChatSettings()
 const holdsMessages = computed(() => isServiceWindowExpired.value && chatSettings.canHoldMessages.value)
-const clinic = useClinicStore()
-const patientPanelView = ref('overview')
-const isPatientPanelOpen = ref(false)
-
-watch(() => contactsStore.currentContact?.phone_number, (phone) => {
-  if (phone) clinic.load(phone)
-  else clinic.clear()
-}, { immediate: true })
-
-function openPatientPanel(view: string) {
-  patientPanelView.value = view
-  isPatientPanelOpen.value = true
-}
-
-function useDraft(text: string) {
-  messageInput.value = text
-  nextTick(() => {
-    autoResizeTextarea()
-    messageInputRef.value?.focus()
-  })
-}
-
+const { patientPanelView, isPatientPanelOpen, openPatientPanel } = usePatientPanel()
+const { switchDraft, forgetDraft, useDraft, insertIntoComposer } = useChatDrafts({ messageInput, messageInputRef, autoResize: autoResizeTextarea })
 const { assigneeFields } = useContactActions()
 useUnreadTabTitle()
-
-const heldMessages = computed(() => contactsStore.messages.filter(m => m.status === 'held'))
 
 function openTemplatePicker() {
   const btn = templatePickerRef.value?.querySelector('button')
@@ -598,14 +578,8 @@ function updateStickyDate(scrollContainer: HTMLElement) {
 }
 
 // Watch for route changes
-// Each chat keeps its own draft, so text typed for one patient can't go to another.
-const drafts = new Map<string, string>()
-
 watch(contactId, async (newId, oldId) => {
-  if (oldId) drafts.set(String(oldId), messageInput.value)
-  messageInput.value = newId ? drafts.get(String(newId)) || '' : ''
-  contactsStore.clearReplyingTo()
-  nextTick(autoResizeTextarea)
+  switchDraft(newId, oldId)
   if (newId) {
     notesStore.notes = []
     notesStore.hasMore = false
@@ -781,7 +755,7 @@ async function sendMessage() {
       contactsStore.replyingTo?.id,
       selectedAccount.value || undefined
     )
-    drafts.delete(targetId)
+    forgetDraft(targetId)
     // Keep anything typed while this was sending.
     if (contactsStore.currentContact?.id === targetId && messageInput.value === body) messageInput.value = ''
     contactsStore.clearReplyingTo()
@@ -824,16 +798,7 @@ async function retryMessage(message: Message) {
   }
 }
 
-let lastTypingSentAt = 0
-
-function onComposerInput() {
-  autoResizeTextarea()
-  const contact = contactsStore.currentContact
-  if (contact && Date.now() - lastTypingSentAt > 2500) {
-    lastTypingSentAt = Date.now()
-    wsService.sendAgentTyping(contact.id, authStore.user?.full_name || '')
-  }
-}
+const { onComposerInput } = useTypingNotice(autoResizeTextarea)
 
 function autoResizeTextarea() {
   const textarea = messageInputRef.value
@@ -964,15 +929,6 @@ function handleCannedSelect(response: CannedResponse) {
     return
   }
   cannedDialogOpen.value = true
-}
-
-function insertIntoComposer(text: string) {
-  const before = messageInput.value.trimEnd()
-  messageInput.value = before ? `${before} ${text}` : text
-  nextTick(() => {
-    autoResizeTextarea()
-    messageInputRef.value?.focus()
-  })
 }
 
 async function sendCannedResponse() {
@@ -1686,18 +1642,7 @@ async function handleFileSelect(event: Event) {
   if (file) await prepareFile(file)
 }
 
-function handleComposerPaste(event: ClipboardEvent) {
-  const file = event.clipboardData?.files?.[0]
-  if (file) {
-    event.preventDefault()
-    prepareFile(file)
-  }
-}
-
-function handleChatDrop(event: DragEvent) {
-  const file = event.dataTransfer?.files?.[0]
-  if (file) prepareFile(file)
-}
+const { handleComposerPaste, handleChatDrop } = useFilePasteDrop(prepareFile)
 
 async function prepareFile(file: File) {
   // Validate file type
@@ -2549,34 +2494,9 @@ async function sendMediaMessage() {
         </ScrollArea>
         </div>
 
-        <!-- Someone else is answering this patient -->
-        <div
-          v-if="contactsStore.agentTyping"
-          class="px-4 py-1 border-t border-sky-500/20 bg-sky-500/10 light:bg-sky-50 text-xs text-sky-300 light:text-sky-800"
-        >
-          {{ $t('chat.colleagueTyping', { name: contactsStore.agentTyping }) }}
-        </div>
-
-        <!-- 24-hour window closed: staff type normally, the message waits for the patient -->
-        <div
-          v-if="holdsMessages"
-          class="px-4 py-2 border-t border-amber-500/25 bg-amber-500/10 light:bg-amber-50 light:border-amber-200 flex items-center gap-2"
-        >
-          <Hourglass class="h-4 w-4 text-amber-400 light:text-amber-600 shrink-0" />
-          <div class="flex-1 min-w-0">
-            <p class="text-xs font-medium text-amber-300 light:text-amber-800">
-              {{ heldMessages.length ? $t('chat.heldWaiting', { name: contactTitle(contactsStore.currentContact), count: heldMessages.length }) : $t('chat.windowClosedTitle', { name: contactTitle(contactsStore.currentContact) }) }}
-            </p>
-            <p class="text-[11px] text-amber-200/70 light:text-amber-700">
-              {{ heldMessages.length ? $t('chat.heldWaitingHint') : $t('chat.windowClosedHint') }}
-            </p>
-          </div>
-          <button type="button" class="shrink-0 text-[11px] underline text-amber-300 light:text-amber-800" @click="openTemplatePicker">
-            {{ $t('chat.sendTemplateInstead') }}
-          </button>
-        </div>
-
-        <!-- 24-hour window closed and nothing set up to hold messages: only templates go out -->
+        <ColleagueTyping />
+        <HeldBanner v-if="holdsMessages" :contact="contactsStore.currentContact" @send-template="openTemplatePicker" />
+        <!-- Service window expired banner -->
         <div
           v-else-if="isServiceWindowExpired"
           class="px-4 py-2.5 border-t border-red-500/20 bg-red-500/10 flex items-center gap-2"
@@ -2681,21 +2601,7 @@ async function sendMediaMessage() {
               @input="onComposerInput"
               @paste="handleComposerPaste"
             />
-            <button
-              type="submit"
-              :class="[
-                'h-9 rounded-lg flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50',
-                holdsMessages
-                  ? 'px-3 shrink-0 text-xs font-medium text-white bg-amber-600 hover:bg-amber-500'
-                  : 'w-9 bg-emerald-600 hover:bg-emerald-500 light:bg-emerald-500 light:hover:bg-emerald-600'
-              ]"
-              :disabled="!messageInput.trim() || isSending"
-            >
-              <template v-if="holdsMessages">
-                <Hourglass class="w-3.5 h-3.5" />{{ $t('chat.sendWhenTheyReply') }}
-              </template>
-              <Send v-else class="w-4 h-4 text-white" />
-            </button>
+            <ComposerSendButton :holds="holdsMessages" :disabled="!messageInput.trim() || isSending" />
           </form>
         </div>
       </template>
@@ -2709,7 +2615,6 @@ async function sendMediaMessage() {
     />
 
     <MessageToolDialogs />
-    <!-- Patient details and clinic actions -->
     <PatientPanel
       v-if="contactsStore.currentContact && isPatientPanelOpen"
       v-model:view="patientPanelView"
@@ -2974,30 +2879,14 @@ async function sendMediaMessage() {
             />
           </div>
 
-          <!-- 24-hour window closed: the file waits for the patient, like text -->
-          <p v-if="holdsMessages" class="flex items-start gap-2 text-xs text-amber-400 light:text-amber-700">
-            <Hourglass class="h-3.5 w-3.5 mt-0.5 shrink-0" />
-            <span>{{ $t('chat.mediaHeldHint') }}</span>
-          </p>
+          <HeldMediaHint v-if="holdsMessages" />
 
           <!-- Actions -->
           <div class="flex justify-end gap-2">
             <Button variant="outline" @click="closeMediaDialog" :disabled="isUploadingMedia">
               {{ $t('common.cancel') }}
             </Button>
-            <Button
-              @click="sendMediaMessage"
-              :disabled="isUploadingMedia"
-              :class="holdsMessages && 'bg-amber-600 hover:bg-amber-500 text-white'"
-            >
-              <template v-if="isUploadingMedia">{{ $t('chat.sending') }}...</template>
-              <template v-else-if="holdsMessages">
-                <Hourglass class="mr-2 h-4 w-4" />{{ $t('chat.sendWhenTheyReply') }}
-              </template>
-              <template v-else>
-                <Send class="mr-2 h-4 w-4" />{{ $t('chat.send') }}
-              </template>
-            </Button>
+            <MediaSendButton :holds="holdsMessages" :uploading="isUploadingMedia" @click="sendMediaMessage" />
           </div>
         </div>
       </DialogContent>
