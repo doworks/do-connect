@@ -473,6 +473,8 @@
     "sendTemplateInstead": "Send a template instead",
     "sendWhenTheyReply": "Send when they reply",
     "heldNote": "Held. Goes out when they tap View message.",
+    "mediaHeld": "Held. It goes out when they reply.",
+    "mediaHeldHint": "They haven't messaged in the last 24 hours. This goes out as soon as they tap View message or write to you.",
     "cancelHeldFailed": "Could not cancel this message",
     "messageInfo": "Message info",
     "forward": "Forward",
@@ -500,7 +502,10 @@
     "infoTemplate": "Template",
     "infoSent": "Sent",
     "infoDelivered": "Delivered",
-    "infoRead": "Read"
+    "infoRead": "Read",
+    "infoReceived": "Received",
+    "infoLateHint": "WhatsApp delivered this late. The chat shows it at the time they sent it.",
+    "arrivedLate": "Arrived late"
   },
   "contacts": {
     "title": "Contacts",
@@ -2714,6 +2719,7 @@
     "tasks": "Tasks",
     "openTasks": "{count} open",
     "frontDeskNotes": "Notes",
+    "forNextVisit": "For next visit",
     "notRegisteredHint": "Nobody in the clinic system uses {phone}.",
     "movingFrom": "Now:",
     "doctor": "Doctor",

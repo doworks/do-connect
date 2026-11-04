@@ -102,6 +102,7 @@ import {
 } from 'lucide-vue-next'
 import { getInitials, getAvatarGradient } from '@/lib/utils'
 import { normalizePhone, formatPhone, phoneDigits } from '@/lib/phone'
+import { lateArrivalAt } from '@/lib/messageTime'
 import { useColorMode } from '@/composables/useColorMode'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
 import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
@@ -872,14 +873,20 @@ async function selectContact(id: string) {
 // is hidden races with the divider state.
 watch(() => contactsStore.messages.length, (newLen, oldLen) => {
   if (newLen <= oldLen) return
-  const latest = contactsStore.messages[newLen - 1]
+  const last = contactsStore.messages[newLen - 1]
+  // A late message from the patient lands where they wrote it, above the end.
+  const added = contactsStore.messages.find(m => m.id === contactsStore.lastAddedId)
+  const latest = added || last
+  const landedAbove = !!added && added !== last
   const isIncoming = latest?.direction === 'incoming'
   // "Not actively looking" covers both other-tab (hidden) and other-window
   // (visible but unfocused). The divider should pile in either case.
   const userAway = typeof document !== 'undefined'
     && (document.visibilityState === 'hidden' || !document.hasFocus())
   if (isIncoming && userAway) {
-    if (newMessagesCount.value === 0) {
+    // The line goes above the earliest of them, which a late one can be.
+    const firstIndex = contactsStore.messages.findIndex(m => m.id === firstUnreadId.value)
+    if (newMessagesCount.value === 0 || contactsStore.messages.indexOf(latest) < firstIndex) {
       firstUnreadId.value = latest.id
     }
     newMessagesCount.value += 1
@@ -889,6 +896,11 @@ watch(() => contactsStore.messages.length, (newLen, oldLen) => {
   if (!isIncoming && newMessagesCount.value > 0) {
     newMessagesCount.value = 0
     firstUnreadId.value = null
+  }
+  if (landedAbove && isIncoming) {
+    // Staff are looking at the chat, so show it rather than leave it up there unseen.
+    nextTick(() => document.getElementById(`message-${latest.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+    return
   }
   if (isAtBottom.value || !isIncoming) {
     scrollToBottom()
@@ -2007,7 +2019,9 @@ async function sendMediaMessage() {
       scrollToBottom()
     }
 
-    toast.success(t('chat.mediaSent'))
+    // Outside the 24 hours the file waits for the patient, as text does.
+    if (result.data?.status === 'held') toast.success(t('chat.mediaHeld'))
+    else toast.success(t('chat.mediaSent'))
     closeMediaDialog()
   } catch (error: any) {
     toast.error(t('chat.mediaFailed'), {
@@ -2830,7 +2844,7 @@ async function sendMediaMessage() {
                 <span v-if="!getMessageContent(message) && !(isMediaMessage(message) && !message.media_url)" class="chat-bubble-time block clear-both">
                   <span>{{ formatMessageTime(message.created_at) }}</span>
                   <component
-                    v-if="message.direction === 'outgoing'"
+                    v-if="message.direction === 'outgoing' && message.status !== 'held'"
                     :is="getMessageStatusIcon(message.status)"
                     :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]"
                   />
@@ -2900,6 +2914,16 @@ async function sendMediaMessage() {
                   @click="replyToMessage(message)"
                 >
                   <Reply class="h-3 w-3" />
+                </Button>
+                <Button
+                  v-if="lateArrivalAt(message)"
+                  variant="ghost"
+                  size="icon"
+                  class="h-6 w-6 text-amber-400 light:text-amber-600"
+                  :title="$t('chat.arrivedLate')"
+                  @click="infoMessage = message"
+                >
+                  <Info class="h-3 w-3" />
                 </Button>
                 <Button
                   v-if="canForward(message)"
@@ -3187,19 +3211,32 @@ async function sendMediaMessage() {
           <DialogTitle class="text-sm">{{ $t('chat.messageInfo') }}</DialogTitle>
         </DialogHeader>
         <dl v-if="infoMessage" class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
-          <dt class="text-muted-foreground">{{ $t('chat.infoSentBy') }}</dt>
-          <dd class="font-medium">{{ senderName(infoMessage) || '—' }}</dd>
+          <template v-if="infoMessage.direction === 'outgoing'">
+            <dt class="text-muted-foreground">{{ $t('chat.infoSentBy') }}</dt>
+            <dd class="font-medium">{{ senderName(infoMessage) || '—' }}</dd>
+          </template>
           <template v-if="infoMessage.template_name">
             <dt class="text-muted-foreground">{{ $t('chat.infoTemplate') }}</dt>
             <dd class="break-all">{{ infoMessage.template_name }}</dd>
           </template>
           <dt class="text-muted-foreground">{{ $t('chat.infoSent') }}</dt>
           <dd>{{ formatInfoTime(infoMessage.created_at) }}</dd>
-          <dt class="text-muted-foreground">{{ $t('chat.infoDelivered') }}</dt>
-          <dd>{{ formatInfoTime(infoMessage.delivered_at) }}</dd>
-          <dt class="text-muted-foreground">{{ $t('chat.infoRead') }}</dt>
-          <dd>{{ formatInfoTime(infoMessage.read_at) }}</dd>
+          <template v-if="infoMessage.direction === 'incoming'">
+            <template v-if="lateArrivalAt(infoMessage)">
+              <dt class="text-muted-foreground">{{ $t('chat.infoReceived') }}</dt>
+              <dd class="font-medium text-amber-400 light:text-amber-700">{{ formatInfoTime(lateArrivalAt(infoMessage)!) }}</dd>
+            </template>
+          </template>
+          <template v-else>
+            <dt class="text-muted-foreground">{{ $t('chat.infoDelivered') }}</dt>
+            <dd>{{ formatInfoTime(infoMessage.delivered_at) }}</dd>
+            <dt class="text-muted-foreground">{{ $t('chat.infoRead') }}</dt>
+            <dd>{{ formatInfoTime(infoMessage.read_at) }}</dd>
+          </template>
         </dl>
+        <p v-if="infoMessage && lateArrivalAt(infoMessage)" class="text-[11px] text-muted-foreground">
+          {{ $t('chat.infoLateHint') }}
+        </p>
       </DialogContent>
     </Dialog>
 
@@ -3450,15 +3487,29 @@ async function sendMediaMessage() {
             />
           </div>
 
+          <!-- 24-hour window closed: the file waits for the patient, like text -->
+          <p v-if="holdsMessages" class="flex items-start gap-2 text-xs text-amber-400 light:text-amber-700">
+            <Hourglass class="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span>{{ $t('chat.mediaHeldHint') }}</span>
+          </p>
+
           <!-- Actions -->
           <div class="flex justify-end gap-2">
             <Button variant="outline" @click="closeMediaDialog" :disabled="isUploadingMedia">
               {{ $t('common.cancel') }}
             </Button>
-            <Button @click="sendMediaMessage" :disabled="isUploadingMedia">
-              <Send v-if="!isUploadingMedia" class="mr-2 h-4 w-4" />
-              <span v-if="isUploadingMedia">{{ $t('chat.sending') }}...</span>
-              <span v-else>{{ $t('chat.send') }}</span>
+            <Button
+              @click="sendMediaMessage"
+              :disabled="isUploadingMedia"
+              :class="holdsMessages && 'bg-amber-600 hover:bg-amber-500 text-white'"
+            >
+              <template v-if="isUploadingMedia">{{ $t('chat.sending') }}...</template>
+              <template v-else-if="holdsMessages">
+                <Hourglass class="mr-2 h-4 w-4" />{{ $t('chat.sendWhenTheyReply') }}
+              </template>
+              <template v-else>
+                <Send class="mr-2 h-4 w-4" />{{ $t('chat.send') }}
+              </template>
             </Button>
           </div>
         </div>

@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { contactsService, messagesService } from '@/services/api'
 import { phoneDigits } from '@/lib/phone'
+import { insertionIndex, isNewer, laterOf, opensWindow } from '@/lib/messageTime'
 
 // Phones are stored without leading + or whitespace (see CreateContact in
 // internal/handlers/contacts.go). Strip them from a digit-only query so a user
@@ -57,6 +58,8 @@ export interface Message {
   contact_id: string
   direction: 'incoming' | 'outgoing'
   media_missing?: boolean
+  // A patient's message that reached us late; created_at is when they sent it.
+  received_at?: string
   forwarded?: boolean
   saved_to_clinic?: { patient: string; patient_name?: string; kind: string; by_name: string; at: string }
   sent_by_user_id?: string
@@ -102,6 +105,9 @@ export const useContactsStore = defineStore('contacts', () => {
   const contacts = ref<Contact[]>([])
   const currentContact = ref<Contact | null>(null)
   const messages = ref<Message[]>([])
+  // The message that came in live most recently, which a late one may have put
+  // above the end of the chat.
+  const lastAddedId = ref<string | null>(null)
   const isLoading = ref(false)
   const isLoadingMessages = ref(false)
   const isLoadingOlderMessages = ref(false)
@@ -225,6 +231,7 @@ export const useContactsStore = defineStore('contacts', () => {
     // Drop the previous contact's messages immediately so the list doesn't show
     // stale content under the new contact's header while the fetch is in flight.
     messages.value = []
+    lastAddedId.value = null
     try {
       const response = await messagesService.list(contactId, params)
       // API returns { status: "success", data: { messages: [...], has_more: boolean } }
@@ -255,6 +262,7 @@ export const useContactsStore = defineStore('contacts', () => {
 
       if (olderMessages.length > 0) {
         // Prepend older messages (they come in chronological order, oldest first)
+        lastAddedId.value = null
         messages.value = [...olderMessages, ...messages.value]
       }
       hasMoreMessages.value = data.has_more === true
@@ -330,24 +338,28 @@ export const useContactsStore = defineStore('contacts', () => {
 
   // Reflect a new message on its sidebar row. Returns false when the contact
   // isn't in the loaded list (a new conversation, or beyond the loaded pages).
-  function updateContactFromMessage(message: Pick<Message, 'contact_id' | 'direction' | 'status' | 'created_at' | 'message_type' | 'content' | 'sent_by_name' | 'sent_by_label'>): boolean {
+  function updateContactFromMessage(message: Pick<Message, 'contact_id' | 'direction' | 'status' | 'created_at' | 'received_at' | 'message_type' | 'content' | 'sent_by_name' | 'sent_by_label'>): boolean {
     const contact = contacts.value.find(c => c.id === message.contact_id)
     if (!contact) return false
-    contact.last_message_at = message.created_at
-    contact.last_message_direction = message.direction
-    const body = message.content?.body
-    contact.last_message_preview = body && ['text', 'button_reply', 'template', 'interactive'].includes(message.message_type)
-      ? body.slice(0, 100)
-      : `[${message.message_type}]`
+    // A late message from the patient doesn't move the chat back in time.
+    if (isNewer(message.created_at, contact.last_message_at)) {
+      contact.last_message_at = message.created_at
+      contact.last_message_direction = message.direction
+      const body = message.content?.body
+      contact.last_message_preview = body && ['text', 'button_reply', 'template', 'interactive'].includes(message.message_type)
+        ? body.slice(0, 100)
+        : `[${message.message_type}]`
+    }
     if (message.direction === 'incoming') {
       // Mirrors the server's unread count, which excludes already-read
       // messages (e.g. ones the chatbot handled).
       if (message.status !== 'read') {
         contact.unread_count++
-        contact.waiting_since = contact.waiting_since || message.created_at
+        // The wait starts when staff could first see it.
+        contact.waiting_since = contact.waiting_since || new Date().toISOString()
       }
-      contact.last_inbound_at = message.created_at
-      contact.service_window_open = true
+      contact.last_inbound_at = laterOf(contact.last_inbound_at, message.created_at)
+      if (opensWindow(message)) contact.service_window_open = true
     } else {
       contact.last_send_failed = false
       contact.last_reply_by = message.sent_by_label || message.sent_by_name || contact.last_reply_by
@@ -398,8 +410,8 @@ export const useContactsStore = defineStore('contacts', () => {
     updateContactFromMessage(message)
     // Also update currentContact if it matches
     if (currentContact.value && currentContact.value.id === message.contact_id && message.direction === 'incoming') {
-      currentContact.value.last_inbound_at = message.created_at
-      currentContact.value.service_window_open = true
+      currentContact.value.last_inbound_at = laterOf(currentContact.value.last_inbound_at, message.created_at)
+      if (opensWindow(message)) currentContact.value.service_window_open = true
     }
 
     // Skip adding to messages array if account filter is active and doesn't match
@@ -409,9 +421,14 @@ export const useContactsStore = defineStore('contacts', () => {
 
     // Check if message already exists
     const exists = messages.value.some(m => m.id === message.id)
-    if (!exists) {
-      messages.value.push(message)
-    }
+    if (exists) return
+    // In time order, so a late message from the patient sits where they wrote it.
+    // One older than everything loaded shows once older messages are loaded;
+    // putting it first now would make the next page skip what lies between.
+    const index = insertionIndex(messages.value, message.created_at)
+    if (index === 0 && hasMoreMessages.value && messages.value.length > 0) return
+    messages.value.splice(index, 0, message)
+    lastAddedId.value = message.id
   }
 
   function updateMessageStatus(messageId: string, status: string, errorMessage?: string) {
@@ -460,6 +477,7 @@ export const useContactsStore = defineStore('contacts', () => {
 
   function clearMessages() {
     messages.value = []
+    lastAddedId.value = null
     hasMoreMessages.value = false
     accountFilter.value = null
   }
@@ -497,6 +515,7 @@ export const useContactsStore = defineStore('contacts', () => {
     contacts,
     currentContact,
     messages,
+    lastAddedId,
     isLoading,
     isLoadingMessages,
     isLoadingOlderMessages,

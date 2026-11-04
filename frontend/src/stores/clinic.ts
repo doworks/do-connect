@@ -36,7 +36,8 @@ export interface ClinicPatient {
   insurance?: { company: string; expires?: string } | null
   health_form?: { status: string; date?: string } | null
   open_tasks?: number
-  notes?: { text: string; by: string }[]
+  // A handoff for their next visit, or (clinical staff only) a visit or procedure note.
+  notes?: { text: string; by: string; at?: string; kind?: 'next_visit' | 'visit' | 'procedure' }[]
 }
 
 export interface ClinicContext {

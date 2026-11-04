@@ -347,6 +347,7 @@ class WebSocketService {
         reply_to_message: payload.reply_to_message,
         reactions: payload.reactions,
         created_at: payload.created_at,
+        received_at: payload.received_at,
         updated_at: payload.updated_at
       })
     } else {

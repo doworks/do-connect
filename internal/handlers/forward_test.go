@@ -107,6 +107,36 @@ func TestForwarding(t *testing.T) {
 		assert.Contains(t, results[1].Reason, "Photos and files")
 	})
 
+	t.Run("outside the window a photo waits for the reply too, if that's set up", func(t *testing.T) {
+		f := newHeldFixture(t)
+		f.app.Config.Storage.LocalPath = t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(f.app.Config.Storage.LocalPath, "in.jpg"), []byte("jpeg-bytes"), 0o600))
+		f.configure(t)
+		// A patient's photo, with no name of its own.
+		source := f.received(t, f.contact(t, recentlyWrote), models.MessageTypeImage, "Swelling since Monday", "in.jpg", func(m *models.Message) { m.MediaFilename = "" })
+		quiet := f.contact(t)
+
+		_, results := f.forward(t, source.ID, quiet.ID)
+		require.Len(t, results, 1)
+		assert.Equal(t, "held", results[0].Status, results[0].Reason)
+		held := f.status(t, results[0].MessageID)
+		assert.Equal(t, models.MessageStatusHeld, held.Status)
+		assert.Equal(t, models.MessageTypeImage, held.MessageType)
+		assert.Equal(t, "in.jpg", held.MediaURL, "it shares the saved file")
+		assert.Equal(t, source.ID.String(), held.Metadata["forwarded_from"])
+		assert.Empty(t, f.meta.uploads)
+		assert.Len(t, f.meta.ofType("template"), 1, "the unlock notice went out")
+
+		f.patientWrites(t, quiet, "text", "Hello")
+
+		images := f.meta.ofType("image")
+		require.Len(t, images, 1)
+		assert.Equal(t, "Swelling since Monday", images[0]["image"].(map[string]any)["caption"])
+		require.Len(t, f.meta.uploads, 1)
+		assert.Contains(t, f.meta.uploads[0], `filename="whatsapp.jpg"`)
+		assert.Equal(t, models.MessageStatusSent, f.status(t, held.ID).Status)
+	})
+
 	t.Run("a patient's photo and voice note arrive without a name and still forward", func(t *testing.T) {
 		f := newHeldFixture(t)
 		f.app.Config.Storage.LocalPath = t.TempDir()
