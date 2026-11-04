@@ -100,11 +100,11 @@ import TemplatePicker from '@/components/chat/TemplatePicker.vue'
 import MediaViewerDialog from '@/components/chat/MediaViewerDialog.vue'
 // Our additions live in their own components and composables, so this upstream file changes little.
 import {
-  PatientPanel, PatientStrip, ContactFilterTabs, ContactRowBody, ContactListEmpty,
+  PatientPanel, PatientStrip, ContactFilterTabs, ContactRowBody, ContactListEmpty, ChatHeaderChips, ContactSubtitle,
+  ContactMenuItems,
 } from '@/components/chat/chatExtras'
-import { Hourglass, Forward, FolderInput, CalendarClock, Bot, MailWarning, UserCheck } from 'lucide-vue-next'
-import { contactTitle, contactLanguage, senderColor, senderName, isAutomatedSender, firstName, assigneeName } from '@/lib/chatDisplay'
-import { formatPhone } from '@/lib/phone'
+import { Hourglass, Forward, FolderInput, CalendarClock, Bot } from 'lucide-vue-next'
+import { contactTitle, senderColor, senderName, isAutomatedSender } from '@/lib/chatDisplay'
 import { lateArrivalAt } from '@/lib/messageTime'
 import { provideChatSettings } from '@/composables/useChatSettings'
 import { useContactActions } from '@/composables/useContactActions'
@@ -265,7 +265,7 @@ function useDraft(text: string) {
   })
 }
 
-const { markContactUnread } = useContactActions()
+const { assigneeFields } = useContactActions()
 useUnreadTabTitle()
 
 const heldMessages = computed(() => contactsStore.messages.filter(m => m.status === 'held'))
@@ -1385,10 +1385,7 @@ async function assignContactToUser(userId: string | null) {
     // Update current contact with new assignment
     contactsStore.currentContact = {
       ...contactsStore.currentContact,
-      assigned_user_id: userId || undefined,
-      assigned_user_name: userId
-        ? (userId === authStore.user?.id ? authStore.user?.full_name : usersStore.users.find(u => u.id === userId)?.full_name)
-        : undefined
+      ...assigneeFields(userId)
     }
     // Refresh contacts list
     await contactsStore.fetchContacts()
@@ -2060,22 +2057,7 @@ async function sendMediaMessage() {
                 <p class="text-sm font-medium text-white light:text-gray-900" dir="auto">
                   {{ contactTitle(contactsStore.currentContact) }}
                 </p>
-                <span
-                  v-if="contactLanguage(contactsStore.currentContact)"
-                  :class="[
-                    'shrink-0 h-4 px-1 rounded text-[9px] leading-4 font-bold tracking-wide',
-                    contactLanguage(contactsStore.currentContact) === 'AR'
-                      ? 'bg-violet-500/20 text-violet-300 light:bg-violet-100 light:text-violet-700'
-                      : 'bg-sky-500/20 text-sky-300 light:bg-sky-100 light:text-sky-700'
-                  ]"
-                  :title="$t('chat.replyLanguage')"
-                >{{ contactLanguage(contactsStore.currentContact) }}</span>
-                <TagBadge
-                  v-for="tagName in (contactsStore.currentContact.tags || []).filter(t => t !== 'Arabic' && t !== 'English').slice(0, 3)"
-                  :key="tagName"
-                  :color="tagsStore.getTagByName(tagName)?.color"
-                  class="text-[10px] h-4"
-                >{{ tagName }}</TagBadge>
+                <ChatHeaderChips :contact="contactsStore.currentContact" />
                 <Badge v-if="activeTransferId" class="text-[10px] h-5 bg-orange-500/20 text-orange-400 light:bg-orange-100 light:text-orange-700">
                   Paused
                 </Badge>
@@ -2083,21 +2065,7 @@ async function sendMediaMessage() {
                   {{ $t('chat.marketingOptOut', 'Marketing Opt-out') }}
                 </Badge>
               </div>
-              <p class="text-[11px] text-white/50 light:text-gray-500 flex items-center gap-1.5">
-                <span dir="ltr">{{ formatPhone(contactsStore.currentContact.phone_number, defaultCountryCode) }}</span>
-                <template v-if="assigneeName(contactsStore.currentContact)">
-                  <span class="opacity-40">·</span>
-                  <span class="inline-flex items-center gap-1">
-                    <UserCheck class="h-3 w-3" />{{ assigneeName(contactsStore.currentContact) }}
-                  </span>
-                </template>
-                <template v-if="contactsStore.currentContact.last_reply_by">
-                  <span class="opacity-40">·</span>
-                  <span>{{ $t('chat.lastReplyBy') }}
-                    <span :class="['font-medium', senderColor(contactsStore.currentContact.last_reply_by)]">{{ firstName(contactsStore.currentContact.last_reply_by) }}</span>
-                  </span>
-                </template>
-              </p>
+              <ContactSubtitle :contact="contactsStore.currentContact" />
             </div>
           </div>
           <div class="flex items-center gap-1">
@@ -2186,17 +2154,7 @@ async function sendMediaMessage() {
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>{{ $t('chat.contactOptions') }}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  v-if="contactsStore.currentContact.assigned_user_id !== authStore.user?.id"
-                  @click="assignContactToUser(authStore.user!.id)"
-                >
-                  <UserCheck class="mr-2 h-4 w-4" />
-                  <span>{{ $t('chat.assignToMe') }}</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem @click="markContactUnread(contactsStore.currentContact!)">
-                  <MailWarning class="mr-2 h-4 w-4" />
-                  <span>{{ $t('chat.markAsUnread') }}</span>
-                </DropdownMenuItem>
+                <ContactMenuItems :contact="contactsStore.currentContact" @assign-to-me="assignContactToUser(authStore.user!.id)" />
                 <DropdownMenuItem v-if="canAssignContacts" @click="isAssignDialogOpen = true">
                   <UserPlus class="mr-2 h-4 w-4" />
                   <span>{{ $t('chat.assignToAgent') }}</span>
