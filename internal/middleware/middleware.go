@@ -184,6 +184,14 @@ func AuthWithDB(secret string, db *gorm.DB) fastglue.FastMiddleware {
 			return nil
 		}
 
+		// Refresh tokens carry a JTI; access tokens don't. A refresh token must
+		// not work as a bearer token, or it stays usable after it is rotated
+		// or revoked.
+		if claims.ID != "" {
+			_ = r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Invalid or expired token", nil, "")
+			return nil
+		}
+
 		if claims.DeviceID != nil {
 			active, err := mobileDeviceActive(db, *claims.DeviceID, claims.UserID)
 			if err != nil {

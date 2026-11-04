@@ -1,12 +1,14 @@
 package handlers_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/middleware"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/test/testutil"
@@ -262,7 +264,7 @@ func TestApp_RefreshToken_Success(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("refresh")), testutil.WithPassword("password123"))
-	refreshToken := testutil.GenerateTestRefreshToken(t, user, testutil.TestJWTSecret, 7*24*time.Hour)
+	refreshToken := issueTestRefreshToken(t, app, user)
 
 	req := testutil.NewJSONRequest(t, map[string]string{
 		"refresh_token": refreshToken,
@@ -328,7 +330,7 @@ func TestApp_RefreshToken_UserNotFound(t *testing.T) {
 		OrganizationID: uuid.New(),
 		Email:          "fake@example.com",
 	}
-	token := testutil.GenerateTestRefreshToken(t, fakeUser, testutil.TestJWTSecret, 7*24*time.Hour)
+	token := issueTestRefreshToken(t, app, fakeUser)
 
 	req := testutil.NewJSONRequest(t, map[string]string{
 		"refresh_token": token,
@@ -343,7 +345,7 @@ func TestApp_RefreshToken_DisabledUser(t *testing.T) {
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
 	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("disabled")), testutil.WithPassword("password123"), testutil.WithInactive())
-	token := testutil.GenerateTestRefreshToken(t, user, testutil.TestJWTSecret, 7*24*time.Hour)
+	token := issueTestRefreshToken(t, app, user)
 
 	req := testutil.NewJSONRequest(t, map[string]string{
 		"refresh_token": token,
@@ -425,4 +427,45 @@ func TestApp_GeneratedTokensAreValid(t *testing.T) {
 	refreshClaims, ok := refreshToken.Claims.(*middleware.JWTClaims)
 	require.True(t, ok)
 	assert.Equal(t, user.ID, refreshClaims.UserID)
+}
+
+// issueTestRefreshToken returns a refresh token whose JTI is registered in
+// Redis, as generateRefreshToken does.
+func issueTestRefreshToken(t *testing.T, app *handlers.App, user *models.User) string {
+	t.Helper()
+	jti := uuid.New().String()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, app.Redis.Set(ctx, "refresh:"+jti, user.ID.String(), time.Hour).Err())
+	return generateRefreshTokenWithJTI(t, testutil.TestJWTSecret, user, jti, 7*24*time.Hour)
+}
+
+func TestApp_RefreshToken_RejectsTokenWithoutJTI(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	user := testutil.CreateTestUser(t, app.DB, org.ID)
+	// Shaped like an access token: valid signature, no JTI.
+	token := testutil.GenerateTestRefreshToken(t, user, testutil.TestJWTSecret, 15*time.Minute)
+
+	req := testutil.NewJSONRequest(t, map[string]string{"refresh_token": token})
+	require.NoError(t, app.RefreshToken(req))
+	testutil.AssertErrorResponse(t, req, fasthttp.StatusUnauthorized, "Invalid refresh token")
+	assert.Empty(t, testutil.GetResponseCookie(req, "whm_refresh"))
+}
+
+func TestApp_RefreshToken_RejectsAccessTokenFromLogin(t *testing.T) {
+	app := newTestApp(t)
+	org := testutil.CreateTestOrganization(t, app.DB)
+	email := testutil.UniqueEmail("access-as-refresh")
+	testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(email), testutil.WithPassword("password123"))
+
+	login := testutil.NewJSONRequest(t, map[string]string{"email": email, "password": "password123"})
+	require.NoError(t, app.Login(login))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(login))
+	accessToken := testutil.GetResponseCookie(login, "whm_access")
+	require.NotEmpty(t, accessToken)
+
+	req := testutil.NewJSONRequest(t, map[string]string{"refresh_token": accessToken})
+	require.NoError(t, app.RefreshToken(req))
+	testutil.AssertErrorResponse(t, req, fasthttp.StatusUnauthorized, "Invalid refresh token")
 }

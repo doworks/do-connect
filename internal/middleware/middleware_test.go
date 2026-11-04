@@ -172,6 +172,32 @@ func TestAuth_ExpiredJWT(t *testing.T) {
 	assert.Equal(t, fasthttp.StatusUnauthorized, req.RequestCtx.Response.StatusCode())
 }
 
+func TestAuth_RejectsRefreshToken(t *testing.T) {
+	t.Parallel()
+
+	// Refresh tokens are the only tokens with a JTI.
+	claims := middleware.JWTClaims{
+		UserID:         uuid.New(),
+		OrganizationID: uuid.New(),
+		Email:          "test@example.com",
+		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        uuid.New().String(),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(testJWTSecret))
+	require.NoError(t, err)
+
+	req := newTestRequest()
+	req.RequestCtx.Request.Header.Set("Authorization", "Bearer "+token)
+
+	result := middleware.Auth(testJWTSecret)(req)
+
+	assert.Nil(t, result, "a refresh token must not authenticate API requests")
+	assert.Equal(t, fasthttp.StatusUnauthorized, req.RequestCtx.Response.StatusCode())
+}
+
 func TestAuth_InvalidJWT(t *testing.T) {
 	t.Parallel()
 

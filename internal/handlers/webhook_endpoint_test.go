@@ -243,6 +243,99 @@ func TestApp_WebhookHandler_InvalidSignature_Rejected(t *testing.T) {
 		"invalid signature must be rejected before any processing")
 }
 
+// createWebhookTestAccount stores an account with the given App Secret.
+func createWebhookTestAccount(t *testing.T, app *handlers.App, orgID uuid.UUID, phoneID, businessID, appSecret string) {
+	t.Helper()
+	require.NoError(t, app.DB.Create(&models.WhatsAppAccount{
+		BaseModel:          models.BaseModel{ID: uuid.New()},
+		OrganizationID:     orgID,
+		Name:               "wbk-" + phoneID,
+		PhoneID:            phoneID,
+		BusinessID:         businessID,
+		AccessToken:        "tok",
+		AppSecret:          appSecret,
+		WebhookVerifyToken: "vt",
+		APIVersion:         "v18.0",
+		Status:             "active",
+	}).Error)
+}
+
+func postWebhook(t *testing.T, app *handlers.App, body []byte, signature string) int {
+	t.Helper()
+	req := testutil.NewRequest(t)
+	req.RequestCtx.Request.Header.SetMethod("POST")
+	req.RequestCtx.Request.Header.SetContentType("application/json")
+	if signature != "" {
+		req.RequestCtx.Request.Header.Set("X-Hub-Signature-256", signature)
+	}
+	req.RequestCtx.Request.SetBody(body)
+	require.NoError(t, app.WebhookHandler(req))
+	return testutil.GetResponseStatusCode(req)
+}
+
+func TestApp_WebhookHandler_MissingSignature_Rejected(t *testing.T) {
+	app := newAppForWebhook(t, "")
+	org := testutil.CreateTestOrganization(t, app.DB)
+	phoneID := "phone-" + uuid.NewString()[:8]
+	createWebhookTestAccount(t, app, org.ID, phoneID, "biz-"+phoneID, "real-secret")
+
+	assert.Equal(t, fasthttp.StatusForbidden, postWebhook(t, app, makeMessagesPayload(phoneID), ""),
+		"an account with an App Secret must not accept unsigned events")
+}
+
+func TestApp_WebhookHandler_UnsignedTemplateStatus_Rejected(t *testing.T) {
+	app := newAppForWebhook(t, "")
+	org := testutil.CreateTestOrganization(t, app.DB)
+	phoneID := "phone-" + uuid.NewString()[:8]
+	wabaID := "biz-" + phoneID
+	createWebhookTestAccount(t, app, org.ID, phoneID, wabaID, "real-secret")
+
+	body, _ := json.Marshal(map[string]any{
+		"object": "whatsapp_business_account",
+		"entry": []map[string]any{{
+			"id": wabaID,
+			"changes": []map[string]any{{
+				"field": "message_template_status_update",
+				"value": map[string]any{"event": "REJECTED", "message_template_name": "welcome", "message_template_language": "en"},
+			}},
+		}},
+	})
+
+	assert.Equal(t, fasthttp.StatusForbidden, postWebhook(t, app, body, ""))
+	assert.Equal(t, fasthttp.StatusForbidden, postWebhook(t, app, body, signWebhook(body, "WRONG-SECRET")))
+	assert.Equal(t, fasthttp.StatusOK, postWebhook(t, app, body, signWebhook(body, "real-secret")))
+}
+
+func TestApp_WebhookHandler_EveryChangeVerified(t *testing.T) {
+	// A payload signed with one account's secret must not carry changes for
+	// another account in the same entry.
+	app := newAppForWebhook(t, "")
+	org := testutil.CreateTestOrganization(t, app.DB)
+	ownPhone := "phone-" + uuid.NewString()[:8]
+	otherPhone := "phone-" + uuid.NewString()[:8]
+	createWebhookTestAccount(t, app, org.ID, ownPhone, "biz-"+ownPhone, "own-secret")
+	createWebhookTestAccount(t, app, org.ID, otherPhone, "biz-"+otherPhone, "other-secret")
+
+	change := func(phoneID string) map[string]any {
+		return map[string]any{
+			"field": "messages",
+			"value": map[string]any{
+				"messaging_product": "whatsapp",
+				"metadata":          map[string]any{"phone_number_id": phoneID},
+			},
+		}
+	}
+	body, _ := json.Marshal(map[string]any{
+		"object": "whatsapp_business_account",
+		"entry": []map[string]any{{
+			"id":      "biz-" + ownPhone,
+			"changes": []map[string]any{change(ownPhone), change(otherPhone)},
+		}},
+	})
+
+	assert.Equal(t, fasthttp.StatusForbidden, postWebhook(t, app, body, signWebhook(body, "own-secret")))
+}
+
 func TestApp_WebhookHandler_MalformedJSONRejected(t *testing.T) {
 	app := newAppForWebhook(t, "")
 
