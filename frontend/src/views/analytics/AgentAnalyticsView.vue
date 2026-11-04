@@ -10,6 +10,7 @@ import { agentAnalyticsService } from '@/services/api'
 import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
 import { PageHeader, ErrorState, DateRangePicker } from '@/components/shared'
+import StaffReport from '@/components/analytics/StaffReport.vue'
 import {
   Command,
   CommandEmpty,
@@ -76,6 +77,9 @@ const usersStore = useUsersStore()
 // Permission-driven (analytics.agents:read), not role-name based — custom
 // roles with the right permission should get the same view.
 const isAdminOrManager = computed(() => authStore.hasPermission('analytics.agents', 'read'))
+// The staff report shows everyone's numbers, so it needs the analytics permission
+// the server checks, not just the agent-analytics one agents have too.
+const canSeeStaffReport = computed(() => authStore.hasPermission('analytics', 'read'))
 
 const analytics = ref<AgentAnalyticsResponse | null>(null)
 const isLoading = ref(true)
@@ -364,6 +368,13 @@ void _displayStats.value // Suppress unused warning
     <!-- Content -->
     <ScrollArea class="flex-1">
       <div class="p-6 space-y-6">
+        <StaffReport
+          v-if="canSeeStaffReport"
+          :from="dateRange.from"
+          :to="dateRange.to"
+          :agent-id="selectedAgentId"
+        />
+
         <!-- Error State -->
         <ErrorState
           v-if="error && !isLoading"
