@@ -12,7 +12,8 @@ let notificationSound: HTMLAudioElement | null = null
 
 function playNotificationSound() {
   if (!notificationSound) {
-    notificationSound = new Audio('/notification.mp3')
+    const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
+    notificationSound = new Audio(`${basePath}/notification.mp3`)
     notificationSound.volume = 0.5
   }
   notificationSound.currentTime = 0

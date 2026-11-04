@@ -21,6 +21,12 @@ const RINGTONE_VOLUME = 0.5
 // ringing forever. Comfortably longer than any ring window the server uses.
 const MAX_RING_MS = 60_000
 
+// The sounds are public assets, served under the deployment's base path.
+function soundURL(path: string): string {
+  const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
+  return basePath + path
+}
+
 let element: HTMLAudioElement | null = null
 let loadedSrc: string | null = null
 let stopTimer: ReturnType<typeof setTimeout> | null = null
@@ -43,7 +49,7 @@ export function startRinging() {
   const src = SOURCES[choice] ?? SOURCES[DEFAULT_RINGTONE as Exclude<CallRingtone, 'none'>]
   if (!element || loadedSrc !== src) {
     element?.pause()
-    element = new Audio(src)
+    element = new Audio(soundURL(src))
     element.loop = true
     element.volume = RINGTONE_VOLUME
     loadedSrc = src
@@ -82,7 +88,7 @@ export function previewRingtone(choice: CallRingtone) {
   if (choice === 'none') {
     return
   }
-  const audio = new Audio(SOURCES[choice])
+  const audio = new Audio(soundURL(SOURCES[choice]))
   audio.volume = RINGTONE_VOLUME
   audio.play().catch(() => {})
 }
