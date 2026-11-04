@@ -128,11 +128,24 @@ func (a *App) processCallWebhook(phoneNumberID string, call any) {
 			"ivr_flow_id":  callLog.IVRFlowID,
 			"started_at":   now.Format(time.RFC3339),
 		}
+		if callTurnedAway(callLog) {
+			break
+		}
 		// Sticky routing: if the customer tapped a voice_call button, the call
 		// belongs to the agent who sent it and nobody else. Only an organic
 		// call reaches the rest of the org.
 		route := a.stickyRouteForCall(context.Background(), ce.BizOpaqueCallbackData, account.OrganizationID, contact.PhoneNumber, callLog)
+		// Calling hours: outside them the call is declined and the patient told
+		// when the clinic opens; inside, only the staff on duty are rung.
+		screen := a.screenCall(account.OrganizationID, route != nil, now)
 		switch {
+		case screen.decline:
+			a.declineClosedCall(account, contact, callLog, screen.rules, now)
+		case route == nil && screen.rules != nil && a.WSHub != nil:
+			a.WSHub.BroadcastToUsers(account.OrganizationID, screen.ring, websocket.WSMessage{
+				Type:    websocket.TypeCallIncoming,
+				Payload: payload,
+			})
 		case route == nil:
 			a.broadcastCallEvent(account.OrganizationID, websocket.TypeCallIncoming, payload)
 		case route.Eligible:
@@ -161,10 +174,19 @@ func (a *App) processCallWebhook(phoneNumberID string, call any) {
 			sdpOffer = ce.Session.SDP
 		}
 
+		// Already declined at "ringing": there is nothing to answer.
+		if callTurnedAway(callLog) {
+			return
+		}
+
 		// Resolve the sticky route again here — Meta echoes
 		// biz_opaque_callback_data on every call event, and the call log
 		// carries the agent we recorded at "ringing".
 		route := a.stickyRouteForCall(context.Background(), ce.BizOpaqueCallbackData, account.OrganizationID, contact.PhoneNumber, callLog)
+		if screen := a.screenCall(account.OrganizationID, route != nil, now); screen.decline {
+			a.declineClosedCall(account, contact, callLog, screen.rules, now)
+			return
+		}
 		if route != nil && !route.Eligible {
 			// Answering would only park the customer on hold waiting for an
 			// agent who can't come. End it and leave a missed call in chat.
@@ -224,6 +246,8 @@ func (a *App) processCallWebhook(phoneNumberID string, call any) {
 		// Re-read the call log to get the latest agent_id (may have been set
 		// by transfer acceptance after our initial read).
 		a.DB.First(callLog, callLog.ID)
+		// A call declined by the server already told the patient why.
+		turnedAway := callTurnedAway(callLog)
 
 		duration := 0
 		if callLog.AnsweredAt != nil {
@@ -252,6 +276,9 @@ func (a *App) processCallWebhook(phoneNumberID string, call any) {
 		a.DB.Model(callLog).Updates(updates)
 
 		if finalStatus == models.CallStatusMissed {
+			if !turnedAway {
+				a.noticeAfterMissedCall(account, contact, now)
+			}
 			a.recordMissedCallMessage(callLog, contact)
 		}
 
@@ -274,12 +301,16 @@ func (a *App) processCallWebhook(phoneNumberID string, call any) {
 		})
 
 	case "missed", "unanswered":
+		turnedAway := callTurnedAway(callLog)
 		a.DB.Model(callLog).Updates(map[string]any{
 			"status":          models.CallStatusMissed,
 			"ended_at":        now,
 			"disconnected_by": models.DisconnectedByClient,
 		})
 
+		if !turnedAway {
+			a.noticeAfterMissedCall(account, contact, now)
+		}
 		a.recordMissedCallMessage(callLog, contact)
 
 		a.broadcastCallEvent(account.OrganizationID, websocket.TypeCallEnded, map[string]any{

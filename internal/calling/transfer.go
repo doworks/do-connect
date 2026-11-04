@@ -111,7 +111,8 @@ func (m *Manager) initiateTransfer(session *CallSession, waAccount string, teamT
 		var contact models.Contact
 		if m.db.Select("assigned_user_id").Where("id = ?", session.ContactID).First(&contact).Error == nil && contact.AssignedUserID != nil {
 			var agent models.User
-			if m.db.Where("id = ? AND is_available = ?", contact.AssignedUserID, true).First(&agent).Error == nil {
+			if m.db.Where("id = ? AND is_available = ?", contact.AssignedUserID, true).First(&agent).Error == nil &&
+				m.ringableNow(session.OrganizationID).allows(agent.ID) {
 				assignedAgentID = contact.AssignedUserID
 				m.log.Info("Routing call to assigned agent (relationship manager)",
 					"call_id", session.ID, "agent_id", assignedAgentID, "contact_id", session.ContactID)
@@ -179,7 +180,7 @@ func (m *Manager) initiateTransfer(session *CallSession, waAccount string, teamT
 			"whatsapp_account": transfer.WhatsAppAccount,
 			"transferred_at":   transfer.TransferredAt.Format(time.RFC3339),
 		}
-		m.broadcastEvent(transfer.OrganizationID, websocket.TypeCallTransferWaiting, payload)
+		m.offerToRingable(transfer.OrganizationID, payload)
 	}
 
 	var teamIDStr string
@@ -266,7 +267,7 @@ func (m *Manager) handleAssignedAgentTimeout(session *CallSession, transfer mode
 	session.TransferCancel = fallbackCancel
 	session.TransferAccepted = make(chan struct{})
 	session.mu.Unlock()
-	m.broadcastEvent(transfer.OrganizationID, websocket.TypeCallTransferWaiting, payload)
+	m.offerToRingable(transfer.OrganizationID, payload)
 	m.waitForTransferTimeout(fallbackCtx, session, transfer.ID)
 }
 
@@ -471,7 +472,7 @@ func (m *Manager) InitiateAgentTransfer(callLogID, initiatingAgentID uuid.UUID, 
 			"initiating_agent_id": initiatingAgentID.String(),
 			"transferred_at":      transfer.TransferredAt.Format(time.RFC3339),
 		}
-		m.broadcastEvent(session.OrganizationID, websocket.TypeCallTransferWaiting, payload)
+		m.offerToRingable(session.OrganizationID, payload)
 	}
 
 	var teamIDStr string
@@ -872,6 +873,8 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 	teamID := *transfer.TeamID
 	orgID := transfer.OrganizationID
 	triedAgents := []uuid.UUID{}
+	// Only staff the calling hours allow right now are rung.
+	ring := m.ringableNow(orgID)
 
 	// Resolve per-agent timeout: team > global default
 	teamCfg := m.assigner.GetTeamConfig(teamID)
@@ -926,6 +929,13 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 		// Skip agents who are not online (no active WebSocket connection)
 		if !m.wsHub.IsUserOnline(orgID, *agentID) {
 			m.log.Debug("Rotation: skipping offline agent",
+				"transfer_id", transfer.ID,
+				"agent_id", *agentID,
+			)
+			continue
+		}
+		if !ring.allows(*agentID) {
+			m.log.Debug("Rotation: skipping agent outside their calling hours",
 				"transfer_id", transfer.ID,
 				"agent_id", *agentID,
 			)
@@ -1011,7 +1021,7 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 
 	// Fallback: broadcast to all remaining available AND online team members
 	remaining := m.assigner.GetAvailableAgents(teamID, triedAgents)
-	remaining = m.wsHub.FilterOnlineUsers(orgID, remaining)
+	remaining = ring.filter(m.wsHub.FilterOnlineUsers(orgID, remaining))
 	if len(remaining) == 0 {
 		// No agents online — go straight to no_answer instead of
 		// holding the caller on hold music for the full timeout.

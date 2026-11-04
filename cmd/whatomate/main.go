@@ -859,6 +859,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/ivr-flows/audio", app.UploadIVRAudio)
 	g.GET("/api/ivr-flows/audio/{filename}", app.ServeIVRAudio)
 
+	// Calling hours
+	g.GET("/api/calling/rules", app.GetCallRules)
+	g.PUT("/api/calling/rules", app.UpdateCallRules)
+
 	// Call Logs
 	g.GET("/api/call-logs", app.ListCallLogs)
 	g.GET("/api/call-logs/{id}", app.GetCallLog)
