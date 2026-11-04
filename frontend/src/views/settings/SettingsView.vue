@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { PageHeader, AuditLogPanel } from '@/components/shared'
 import LanguageSwitcher from '@/components/LanguageSwitcher.vue'
 import { toast } from 'vue-sonner'
-import { Settings, Bell, Loader2, Globe, Phone, Upload, Play, Pause, Music } from 'lucide-vue-next'
+import { Settings, Bell, Loader2, Globe, Phone, Upload, Play, Pause, Music, Clock, ChevronRight } from 'lucide-vue-next'
 import { usersService, organizationService } from '@/services/api'
 import { useAuthStore, type CallRingtone } from '@/stores/auth'
 import { previewRingtone } from '@/lib/ringtone'
@@ -517,6 +517,11 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
                     @update:checked="callingSettings.calling_enabled = $event"
                   />
                 </div>
+                <Separator class="bg-white/[0.08] light:bg-gray-200" />
+                <RouterLink to="/settings/calling-hours" class="flex items-center justify-between gap-4 rounded-lg -mx-2 px-2 py-1.5 hover:bg-white/[0.04] light:hover:bg-gray-50">
+                  <span class="flex items-center gap-2 font-medium text-white light:text-gray-900"><Clock class="h-4 w-4 text-emerald-400 light:text-emerald-700" />{{ $t('callHours.settingsLink') }}</span>
+                  <ChevronRight class="h-4 w-4 text-white/40 light:text-gray-400" />
+                </RouterLink>
                 <Separator class="bg-white/[0.08] light:bg-gray-200" />
                 <div class="grid grid-cols-2 gap-4" :class="{ 'opacity-50 pointer-events-none': !callingSettings.calling_enabled }">
                   <div class="space-y-2">

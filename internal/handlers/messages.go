@@ -101,6 +101,9 @@ type MessageSendOptions struct {
 	// of creating a new row.
 	ExistingMessage *models.Message
 
+	// Metadata is added to the new message's metadata.
+	Metadata models.JSONB
+
 	// Async if true, sends in background goroutine and returns immediately
 	// Message is persisted before send, status updated after
 	Async bool
@@ -403,6 +406,13 @@ func (a *App) createOutgoingMessage(req OutgoingMessageRequest, opts MessageSend
 				msg.InteractiveData = a.buildInteractiveData(req)
 			}
 		}
+	}
+
+	if len(opts.Metadata) > 0 {
+		if msg.Metadata == nil {
+			msg.Metadata = models.JSONB{}
+		}
+		maps.Copy(msg.Metadata, opts.Metadata)
 	}
 
 	// Handle reply context

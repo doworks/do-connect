@@ -45,7 +45,9 @@ func (a *App) rejectUnreachableStickyCall(account *models.WhatsAppAccount, conta
 		"disconnected_by": models.DisconnectedBySystem,
 	})
 	callLog.Status = models.CallStatusMissed
+	callLog.DisconnectedBy = models.DisconnectedBySystem
 
+	a.noticeAfterMissedCall(account, contact, now)
 	a.recordMissedCallMessage(callLog, contact)
 
 	a.Log.Info("Rejected click-to-call call: originating agent unreachable",

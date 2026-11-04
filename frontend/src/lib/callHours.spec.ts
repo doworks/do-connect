@@ -27,9 +27,12 @@ const rules = (over: Partial<CallRules> = {}): CallRules => ({
   outside_action: 'message',
   message_gap_hours: 6,
   messages: { closed: { en: '', ar: '' }, missed: { en: '', ar: '' } },
+  templates: { closed: { en: '', ar: '' }, missed: { en: '', ar: '' } },
   staff: [],
   ...over,
 })
+
+// internal/callhours/callhours_test.go checks the server against these cases.
 
 // Tuesday 3 Nov 2026 in Bahrain
 const at = (time: string) => new Date(`2026-11-03T${time}:00+03:00`)

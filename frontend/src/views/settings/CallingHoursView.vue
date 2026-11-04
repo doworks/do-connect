@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toast } from 'vue-sonner'
 import {
-  CalendarOff, Clock, Laptop, Lock, MessageSquareText, Phone, PhoneOff, Plus, Smartphone, Trash2, UserRound, Voicemail, BellRing,
+  CalendarOff, Clock, Laptop, Lock, MessageSquareText, Phone, PhoneOff, Plus, Smartphone, Trash2, UserRound, BellRing,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -37,9 +37,12 @@ onMounted(async () => {
 
 async function save() {
   if (!rules.value) return
+  // An emptied box isn't "no gap": keep the usual six hours.
+  if (!Number.isFinite(rules.value.message_gap_hours)) rules.value.message_gap_hours = 6
   isSaving.value = true
   try {
-    await callRulesService.save(rules.value)
+    const response = await callRulesService.save(rules.value)
+    rules.value = response.data.data
     toast.success(t('callHours.saved'))
   } catch (error) {
     toast.error(getErrorMessage(error, t('callHours.saveFailed')))
@@ -175,7 +178,7 @@ function staffSummary(staff: StaffRing) {
             </div>
             <div class="grid gap-1.5">
               <button
-                v-for="option in [{ value: 'message', icon: MessageSquareText }, { value: 'voice', icon: Voicemail }, { value: 'ring', icon: Phone }]"
+                v-for="option in [{ value: 'message', icon: MessageSquareText }, { value: 'ring', icon: Phone }]"
                 :key="option.value"
                 type="button"
                 :class="[
@@ -199,19 +202,30 @@ function staffSummary(staff: StaffRing) {
               <Textarea v-model="rules.messages.closed.en" :rows="3" class="text-xs" />
               <Textarea v-model="rules.messages.closed.ar" :rows="3" class="text-xs" dir="rtl" />
               <p class="text-[11px] text-white/40 light:text-gray-500">{{ t('callHours.nextOpenHint') }}</p>
-              <p class="text-xs font-medium text-white/80 light:text-gray-800 pt-1">{{ t('callHours.missedMessage') }}</p>
-              <Textarea v-model="rules.messages.missed.en" :rows="2" class="text-xs" />
-              <Textarea v-model="rules.messages.missed.ar" :rows="2" class="text-xs" dir="rtl" />
-              <label class="flex items-center gap-2 text-[11px] text-white/60 light:text-gray-600">
-                {{ t('callHours.gapBefore') }}
-                <Input v-model.number="rules.message_gap_hours" type="number" :min="0" :max="72" class="h-7 w-14 text-xs px-1.5" />
-                {{ t('callHours.gapAfter') }}
-              </label>
+              <div class="grid grid-cols-2 gap-1.5">
+                <Input v-model="rules.templates.closed.en" class="h-7 text-xs" :aria-label="t('callHours.templateEn')" :placeholder="t('callHours.templateEn')" />
+                <Input v-model="rules.templates.closed.ar" class="h-7 text-xs" :aria-label="t('callHours.templateAr')" :placeholder="t('callHours.templateAr')" />
+              </div>
               <div class="rounded-lg bg-white/[0.04] light:bg-gray-100 p-2 space-y-1.5">
                 <p class="text-[11px] text-white/45 light:text-gray-500">{{ t('callHours.patientSees') }}</p>
                 <p class="chat-bubble chat-bubble-outgoing text-xs !max-w-full">{{ fill(rules.messages.closed.en, 'en') }}</p>
                 <p class="chat-bubble chat-bubble-outgoing text-xs !max-w-full" dir="rtl">{{ fill(rules.messages.closed.ar, 'ar') }}</p>
               </div>
+            </div>
+            <div class="space-y-2 pt-2 border-t border-white/[0.08] light:border-gray-200">
+              <p class="text-xs font-medium text-white/80 light:text-gray-800">{{ t('callHours.missedMessage') }}</p>
+              <Textarea v-model="rules.messages.missed.en" :rows="2" class="text-xs" />
+              <Textarea v-model="rules.messages.missed.ar" :rows="2" class="text-xs" dir="rtl" />
+              <div class="grid grid-cols-2 gap-1.5">
+                <Input v-model="rules.templates.missed.en" class="h-7 text-xs" :aria-label="t('callHours.templateEn')" :placeholder="t('callHours.templateEn')" />
+                <Input v-model="rules.templates.missed.ar" class="h-7 text-xs" :aria-label="t('callHours.templateAr')" :placeholder="t('callHours.templateAr')" />
+              </div>
+              <p class="text-[11px] text-white/40 light:text-gray-500">{{ t('callHours.templateHint') }}</p>
+              <label class="flex items-center gap-2 text-[11px] text-white/60 light:text-gray-600">
+                {{ t('callHours.gapBefore') }}
+                <Input v-model.number="rules.message_gap_hours" type="number" :min="0" :max="72" class="h-7 w-14 text-xs px-1.5" />
+                {{ t('callHours.gapAfter') }}
+              </label>
             </div>
           </section>
         </div>

@@ -1,6 +1,6 @@
 // When the clinic takes calls and which staff ring. The server applies the same
-// rules when a call arrives; this is so the settings page can show the result
-// while someone is still editing.
+// rules when a call arrives (internal/callhours); this is so the settings page
+// can show the result while someone is still editing. Change both together.
 
 export interface TimeRange {
   start: string
@@ -39,14 +39,22 @@ export interface StaffRing {
   devices: StaffDevice[]
 }
 
+export interface ByLanguage {
+  en: string
+  ar: string
+}
+
 export interface CallRules {
+  // The organization's time zone, set under General settings.
   timezone: string
   closed_now: boolean
   hours: DayHours[]
   closed_dates: ClosedDate[]
   outside_action: 'message' | 'voice' | 'ring'
   message_gap_hours: number
-  messages: { closed: { en: string; ar: string }; missed: { en: string; ar: string } }
+  messages: { closed: ByLanguage; missed: ByLanguage }
+  // Approved template names, for patients outside WhatsApp's 24-hour window.
+  templates: { closed: ByLanguage; missed: ByLanguage }
   staff: StaffRing[]
 }
 
