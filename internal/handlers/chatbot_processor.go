@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -192,7 +193,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	if msg.Context != nil && msg.Context.ID != "" {
 		replyToWAMID = msg.Context.ID
 	}
-	a.saveIncomingMessage(account, contact, msg.ID, messageType, messageText, mediaInfo, replyToWAMID)
+	a.saveIncomingMessageAt(account, contact, msg.ID, messageType, messageText, mediaInfo, replyToWAMID, messageSentAt(msg.Timestamp, time.Now()))
 
 	// Clear chatbot tracking since client has replied
 	a.ClearContactChatbotTracking(contact.ID)
@@ -1549,12 +1550,43 @@ type MediaInfo struct {
 	MediaFilename string
 }
 
-// saveIncomingMessage saves an incoming message to the messages table
+// lateArrival is how long after the patient sent a message it can reach us before
+// the chat shows both times.
+const lateArrival = 2 * time.Minute
+
+// messageSentAt is when the patient sent the message, from Meta's timestamp. A
+// message can reach us hours late (Meta's retries, accepted refused events,
+// replays), and the chat should show when they wrote. Meta gives whole seconds,
+// so the arrival's fraction of a second keeps several messages from the same
+// second in the order they came. A time we can't read, or one after we got the
+// message (a clock that's off), counts as now.
+func messageSentAt(timestamp string, receivedAt time.Time) time.Time {
+	seconds, err := strconv.ParseInt(strings.TrimSpace(timestamp), 10, 64)
+	if err != nil || seconds <= 0 {
+		return receivedAt
+	}
+	sent := time.Unix(seconds, int64(receivedAt.Nanosecond()))
+	if sent.After(receivedAt) {
+		return receivedAt
+	}
+	return sent
+}
+
+// saveIncomingMessage saves an incoming message that has just been sent.
 func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *models.Contact, whatsappMsgID, msgType, content string, mediaInfo *MediaInfo, replyToWAMID string) {
+	a.saveIncomingMessageAt(account, contact, whatsappMsgID, msgType, content, mediaInfo, replyToWAMID, time.Now())
+}
+
+// saveIncomingMessageAt saves an incoming message under the time the patient
+// sent it. A late one also keeps when it arrived.
+func (a *App) saveIncomingMessageAt(account *models.WhatsAppAccount, contact *models.Contact, whatsappMsgID, msgType, content string, mediaInfo *MediaInfo, replyToWAMID string, sentAt time.Time) {
 	now := time.Now()
+	if sentAt.IsZero() || sentAt.After(now) {
+		sentAt = now
+	}
 
 	message := models.Message{
-		BaseModel:         models.BaseModel{ID: uuid.New()},
+		BaseModel:         models.BaseModel{ID: uuid.New(), CreatedAt: sentAt},
 		OrganizationID:    account.OrganizationID,
 		WhatsAppAccount:   account.Name,
 		ContactID:         contact.ID,
@@ -1586,6 +1618,12 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 			message.Metadata = models.JSONB{"media_id": mediaInfo.MediaID}
 		}
 	}
+	if now.Sub(sentAt) > lateArrival {
+		if message.Metadata == nil {
+			message.Metadata = models.JSONB{}
+		}
+		message.Metadata["received_at"] = now.UTC().Format(time.RFC3339Nano)
+	}
 
 	if err := a.DB.Create(&message).Error; err != nil {
 		a.Log.Error("Failed to save incoming message", "error", err)
@@ -1611,27 +1649,38 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		preview = "[" + msgType + "]"
 	}
 
+	// A late message doesn't move the chat back in time. It only becomes the
+	// chat's last message if nothing newer is there already.
+	isLatest := "last_message_at IS NULL OR last_message_at <= ?"
 	contactUpdates := map[string]any{
-		"last_message_at":      now,
-		"last_message_preview": preview,
+		"last_message_at":      gorm.Expr("GREATEST(last_message_at, ?)", sentAt),
+		"last_message_preview": gorm.Expr("CASE WHEN "+isLatest+" THEN ? ELSE last_message_preview END", sentAt, preview),
 		"is_read":              false,
 		"whats_app_account":    account.Name,
-		"last_inbound_at":      now,
-		"last_direction":       models.DirectionIncoming,
-		"last_send_failed":     false,
+		"last_inbound_at":      gorm.Expr("GREATEST(last_inbound_at, ?)", sentAt),
+		"last_direction":       gorm.Expr("CASE WHEN "+isLatest+" THEN ? ELSE last_direction END", sentAt, models.DirectionIncoming),
+		"last_send_failed":     gorm.Expr("CASE WHEN "+isLatest+" THEN false ELSE last_send_failed END", sentAt),
 	}
 	// Messages the chatbot already handled arrive read, and aren't waiting on staff.
+	// The wait starts when staff could first see it, which for a late message is
+	// when it arrived.
 	if message.Status != models.MessageStatusRead {
 		contactUpdates["waiting_since"] = gorm.Expr("COALESCE(waiting_since, ?)", now)
 	}
 	a.DB.Model(contact).Updates(contactUpdates)
+	contact.LastMessageAt = laterTime(contact.LastMessageAt, sentAt)
+	contact.LastInboundAt = laterTime(contact.LastInboundAt, sentAt)
 
 	a.Log.Info("Saved incoming message", "message_id", message.ID, "contact_id", contact.ID, "media_url", message.MediaURL)
 
 	// Broadcast new message via WebSocket
 	a.broadcastNewMessage(account.OrganizationID, &message, contact)
 
-	a.releaseHeldMessages(account, contact, &message)
+	// The 24 hours run from when they sent it, so a message that took longer than
+	// that to reach us doesn't open the window.
+	if serviceWindowOpen(contact) {
+		a.releaseHeldMessages(account, contact, &message)
+	}
 
 	// Dispatch webhook for incoming message
 	a.DispatchWebhook(account.OrganizationID, models.WebhookEventMessageIncoming, MessageEventData{
@@ -1649,6 +1698,13 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 		WhatsAppMsgID:    whatsappMsgID,
 		Direction:        models.DirectionIncoming,
 	})
+}
+
+func laterTime(current *time.Time, t time.Time) *time.Time {
+	if current != nil && current.After(t) {
+		return current
+	}
+	return &t
 }
 
 // isWithinBusinessHours checks if current time is within configured business hours

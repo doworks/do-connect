@@ -81,6 +81,7 @@ type MessageResponse struct {
 	WhatsAppAccount  string               `json:"whatsapp_account,omitempty"`
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
+	ReceivedAt       *time.Time           `json:"received_at,omitempty"` // A patient's message that reached us late; CreatedAt is when they sent it
 	Forwarded        bool                 `json:"forwarded,omitempty"`
 	SavedToClinic    *SavedToClinic       `json:"saved_to_clinic,omitempty"`
 }
@@ -285,6 +286,16 @@ func applyWorklistFields(response *ContactResponse, contact *models.Contact, own
 	}
 }
 
+// receivedAtFrom reads when a late message reached us.
+func receivedAtFrom(metadata models.JSONB) *time.Time {
+	raw, _ := metadata["received_at"].(string)
+	at, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return nil
+	}
+	return &at
+}
+
 // applySenderFields adds who sent a message and when it arrived to a response.
 func applySenderFields(response *MessageResponse, message *models.Message) {
 	response.SentByUserID = message.SentByUserID
@@ -294,6 +305,7 @@ func applySenderFields(response *MessageResponse, message *models.Message) {
 	response.ReadAt = message.ReadAt
 	_, response.Forwarded = message.Metadata["forwarded_from"]
 	response.SavedToClinic = savedToClinicFrom(message.Metadata)
+	response.ReceivedAt = receivedAtFrom(message.Metadata)
 	if message.SentByUser != nil {
 		response.SentByName = message.SentByUser.FullName
 	}

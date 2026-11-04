@@ -500,7 +500,10 @@
     "infoTemplate": "Template",
     "infoSent": "Sent",
     "infoDelivered": "Delivered",
-    "infoRead": "Read"
+    "infoRead": "Read",
+    "infoReceived": "Received",
+    "infoLateHint": "WhatsApp delivered this late. The chat shows it at the time they sent it.",
+    "arrivedLate": "Arrived late"
   },
   "contacts": {
     "title": "Contacts",

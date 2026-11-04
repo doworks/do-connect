@@ -589,6 +589,9 @@ func (a *App) broadcastNewMessage(orgID uuid.UUID, msg *models.Message, contact 
 		payload["sent_by_name"] = msg.SentByUser.FullName
 		payload["sent_by_user_id"] = msg.SentByUser.ID.String()
 	}
+	if receivedAt := receivedAtFrom(msg.Metadata); receivedAt != nil {
+		payload["received_at"] = receivedAt
+	}
 
 	// Add interactive data
 	if msg.InteractiveData != nil {
