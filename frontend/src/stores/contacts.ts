@@ -2,7 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import { contactsService, messagesService } from '@/services/api'
 import { phoneDigits } from '@/lib/phone'
-import { insertionIndex, isNewer, laterOf, opensWindow } from '@/lib/messageTime'
+import { insertionIndex, laterOf, opensWindow } from '@/lib/messageTime'
+import { applyMessageToContact, createAgentTyping, releaseHeldMessage, type ContactExtras, type ListMessage, type MessageExtras } from './contactExtras'
 
 // Phones are stored without leading + or whitespace (see CreateContact in
 // internal/handlers/contacts.go). Strip them from a digit-only query so a user
@@ -12,12 +13,11 @@ function normalizeContactSearch(raw: string): string {
   return phoneDigits(raw) || raw.trim().replace(/^\+/, '')
 }
 
-export interface Contact {
+export interface Contact extends ContactExtras {
   id: string
   phone_number: string
   name: string
   profile_name?: string
-  whatsapp_name?: string
   avatar_url?: string
   status: string
   tags: string[]
@@ -26,14 +26,7 @@ export interface Contact {
   last_inbound_at?: string
   service_window_open?: boolean
   unread_count: number
-  marked_unread?: boolean
-  last_message_preview?: string
-  last_message_direction?: 'incoming' | 'outgoing'
-  last_reply_by?: string
-  last_send_failed?: boolean
-  waiting_since?: string
   assigned_user_id?: string
-  assigned_user_name?: string
   whatsapp_account?: string
   marketing_opt_out?: boolean
   created_at: string
@@ -53,21 +46,10 @@ export interface Reaction {
   from_user?: string
 }
 
-export interface Message {
+export interface Message extends MessageExtras {
   id: string
   contact_id: string
   direction: 'incoming' | 'outgoing'
-  media_missing?: boolean
-  // A patient's message that reached us late; created_at is when they sent it.
-  received_at?: string
-  forwarded?: boolean
-  saved_to_clinic?: { patient: string; patient_name?: string; kind: string; by_name: string; at: string }
-  sent_by_user_id?: string
-  sent_by_name?: string
-  sent_by_label?: string
-  template_name?: string
-  delivered_at?: string
-  read_at?: string
   message_type: string
   content: any
   media_url?: string
@@ -138,15 +120,7 @@ export const useContactsStore = defineStore('contacts', () => {
 
   let latestMessagesRequest = ''
 
-  // Who else is typing in the open chat. Cleared if no more typing arrives.
-  const agentTyping = ref('')
-  let agentTypingTimer: ReturnType<typeof setTimeout> | null = null
-  function noteAgentTyping(payload: { contact_id: string; user_id: string; name: string }) {
-    if (payload.contact_id !== currentContact.value?.id) return
-    agentTyping.value = payload.name
-    if (agentTypingTimer) clearTimeout(agentTypingTimer)
-    agentTypingTimer = setTimeout(() => { agentTyping.value = '' }, 4000)
-  }
+  const { agentTyping, noteAgentTyping } = createAgentTyping(currentContact)
 
   const listFilter = ref('all')
   const filterCounts = ref<Record<string, number>>({})
@@ -338,34 +312,10 @@ export const useContactsStore = defineStore('contacts', () => {
 
   // Reflect a new message on its sidebar row. Returns false when the contact
   // isn't in the loaded list (a new conversation, or beyond the loaded pages).
-  function updateContactFromMessage(message: Pick<Message, 'contact_id' | 'direction' | 'status' | 'created_at' | 'received_at' | 'message_type' | 'content' | 'sent_by_name' | 'sent_by_label'>): boolean {
+  function updateContactFromMessage(message: ListMessage): boolean {
     const contact = contacts.value.find(c => c.id === message.contact_id)
     if (!contact) return false
-    // A late message from the patient doesn't move the chat back in time.
-    if (isNewer(message.created_at, contact.last_message_at)) {
-      contact.last_message_at = message.created_at
-      contact.last_message_direction = message.direction
-      const body = message.content?.body
-      contact.last_message_preview = body && ['text', 'button_reply', 'template', 'interactive'].includes(message.message_type)
-        ? body.slice(0, 100)
-        : `[${message.message_type}]`
-    }
-    if (message.direction === 'incoming') {
-      // Mirrors the server's unread count, which excludes already-read
-      // messages (e.g. ones the chatbot handled).
-      if (message.status !== 'read') {
-        contact.unread_count++
-        // The wait starts when staff could first see it.
-        contact.waiting_since = contact.waiting_since || new Date().toISOString()
-      }
-      contact.last_inbound_at = laterOf(contact.last_inbound_at, message.created_at)
-      if (opensWindow(message)) contact.service_window_open = true
-    } else {
-      contact.last_send_failed = false
-      contact.last_reply_by = message.sent_by_label || message.sent_by_name || contact.last_reply_by
-      // Same rule as the server: only a staff reply ends the wait.
-      if (message.sent_by_name && message.status !== 'held') contact.waiting_since = undefined
-    }
+    applyMessageToContact(contact, message)
     return true
   }
 
@@ -445,20 +395,7 @@ export const useContactsStore = defineStore('contacts', () => {
         ...(errorMessage ? { error_message: errorMessage } : {})
       }
       // A held message going out moves to where the patient actually gets it.
-      if (messages.value[index].status === 'held' && status !== 'failed') {
-        messages.value.splice(index, 1)
-        const released = { ...updated, created_at: new Date().toISOString() }
-        messages.value.push(released)
-        const contact = contacts.value.find(c => c.id === released.contact_id)
-        if (contact) {
-          // Not a staff reply to what the patient just wrote, so any wait stays.
-          contact.last_message_at = released.created_at
-          contact.last_message_direction = 'outgoing'
-          contact.last_message_preview = released.content?.body?.slice(0, 100) || contact.last_message_preview
-          contact.last_reply_by = released.sent_by_name || contact.last_reply_by
-        }
-        return
-      }
+      if (messages.value[index].status === 'held' && status !== 'failed') return releaseHeldMessage(messages.value, index, updated, contacts.value)
       messages.value[index] = updated
     }
   }
