@@ -120,6 +120,9 @@ type AppConfig struct {
 	Environment   string `koanf:"environment"` // development, staging, production
 	Debug         bool   `koanf:"debug"`
 	EncryptionKey string `koanf:"encryption_key"` // AES-256 key for encrypting secrets at rest
+	// DefaultTimezone is the IANA zone for organizations that haven't chosen
+	// one. Reports use it to decide which day a message belongs to.
+	DefaultTimezone string `koanf:"default_timezone"`
 }
 
 type ServerConfig struct {
@@ -248,6 +251,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.App.Environment == "" {
 		cfg.App.Environment = "development"
+	}
+	if cfg.App.DefaultTimezone == "" {
+		cfg.App.DefaultTimezone = "Asia/Bahrain"
 	}
 	if cfg.Server.Host == "" {
 		cfg.Server.Host = "0.0.0.0"

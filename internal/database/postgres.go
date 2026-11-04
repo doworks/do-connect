@@ -243,6 +243,11 @@ func getIndexes() []string {
 		// Indexes
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_created ON messages(contact_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id)`,
+		// Organization-wide reports over a date range (staff report, dashboards)
+		`CREATE INDEX IF NOT EXISTS idx_messages_org_created ON messages(organization_id, created_at)`,
+		// A chat's last answer before a date, for first-reply times in the staff report. Keep the
+		// predicate in step with answerSQL in internal/handlers/staff_report.go.
+		`CREATE INDEX IF NOT EXISTS idx_messages_contact_answers ON messages(contact_id, created_at) WHERE direction = 'outgoing' AND deleted_at IS NULL AND COALESCE(sent_by_label, '') = '' AND metadata->>'campaign_id' IS NULL`,
 		// Partial index for per-contact unread counts in the contact list
 		`CREATE INDEX IF NOT EXISTS idx_messages_contact_unread ON messages(contact_id) WHERE direction = 'incoming' AND status <> 'read' AND deleted_at IS NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_org_phone ON contacts(organization_id, phone_number)`,
