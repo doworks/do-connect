@@ -187,13 +187,19 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
+  // Incremented per fetchMessages call, so a slow response for a chat the
+  // user has already left can't overwrite the one they're looking at.
+  let messagesRequestSeq = 0
+
   async function fetchMessages(contactId: string, params?: { page?: number; limit?: number; account?: string }) {
+    const requestSeq = ++messagesRequestSeq
     isLoadingMessages.value = true
     // Drop the previous contact's messages immediately so the list doesn't show
     // stale content under the new contact's header while the fetch is in flight.
     messages.value = []
     try {
       const response = await messagesService.list(contactId, params)
+      if (requestSeq !== messagesRequestSeq) return
       // API returns { status: "success", data: { messages: [...], has_more: boolean } }
       const data = response.data.data || response.data
       messages.value = data.messages || []
@@ -201,7 +207,9 @@ export const useContactsStore = defineStore('contacts', () => {
     } catch (error) {
       console.error('Failed to fetch messages:', error)
     } finally {
-      isLoadingMessages.value = false
+      if (requestSeq === messagesRequestSeq) {
+        isLoadingMessages.value = false
+      }
     }
   }
 
@@ -332,6 +340,12 @@ export const useContactsStore = defineStore('contacts', () => {
     if (currentContact.value && currentContact.value.id === message.contact_id && message.direction === 'incoming') {
       currentContact.value.last_inbound_at = message.created_at
       currentContact.value.service_window_open = true
+    }
+
+    // A message for another chat (e.g. a send that completed after the user
+    // switched chats) only updates that chat's row, not the open thread.
+    if (currentContact.value?.id !== message.contact_id) {
+      return
     }
 
     // Skip adding to messages array if account filter is active and doesn't match
