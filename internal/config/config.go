@@ -116,7 +116,8 @@ type CallingConfig struct {
 }
 
 type AppConfig struct {
-	Name          string `koanf:"name"`
+	Name          string `koanf:"name"`        // Product name shown in the UI
+	LogoFile      string `koanf:"logo_file"`   // SVG (max 200 KB) used as logo and favicon; empty keeps the default
 	Environment   string `koanf:"environment"` // development, staging, production
 	Debug         bool   `koanf:"debug"`
 	EncryptionKey string `koanf:"encryption_key"` // AES-256 key for encrypting secrets at rest

@@ -1,5 +1,6 @@
 import { createI18n } from 'vue-i18n'
 import en from './locales/en.json'
+import { applyBrandName, brand } from '@/lib/brand'
 
 export type MessageSchema = typeof en
 
@@ -49,6 +50,7 @@ for (const path in localeModules) {
   const code = path.replace('./locales/', '').replace('.json', '')
   messages[code] = localeModules[path]
 }
+applyBrandName(messages, brand.name)
 
 // Get saved locale or detect from browser
 function getDefaultLocale(): string {

@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { toast } from 'vue-sonner'
 import { MessageSquare, Loader2 } from 'lucide-vue-next'
+import { brand } from '@/lib/brand'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -69,7 +70,8 @@ const handleRegister = async () => {
     <Card class="w-full max-w-md">
       <CardHeader class="space-y-1 text-center">
         <div class="flex justify-center mb-4">
-          <div class="h-12 w-12 rounded-xl bg-primary flex items-center justify-center">
+          <img v-if="brand.logo" :src="brand.logo" alt="" class="h-12 w-12 rounded-xl object-contain" />
+          <div v-else class="h-12 w-12 rounded-xl bg-primary flex items-center justify-center">
             <MessageSquare class="h-7 w-7 text-primary-foreground" />
           </div>
         </div>

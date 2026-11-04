@@ -16,6 +16,7 @@ import { Settings, Bell, Loader2, Globe, Phone, Upload, Play, Pause, Music, Cloc
 import { usersService, organizationService } from '@/services/api'
 import { useAuthStore, type CallRingtone } from '@/stores/auth'
 import { previewRingtone } from '@/lib/ringtone'
+import { isRebranded } from '@/lib/brand'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -637,6 +638,10 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
             </div>
           </TabsContent>
         </Tabs>
+        <!-- Licence notice for renamed builds; plain text so the brand name never replaces it -->
+        <p v-if="isRebranded" class="pt-2 text-center text-xs text-white/40 light:text-gray-400">
+          Based on <a href="https://github.com/shridarpatil/whatomate" target="_blank" rel="noopener noreferrer" class="underline hover:text-white/70 light:hover:text-gray-600">Whatomate</a> (AGPL-3.0)
+        </p>
       </div>
     </ScrollArea>
   </div>

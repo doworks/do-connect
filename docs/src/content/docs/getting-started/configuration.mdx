@@ -131,7 +131,8 @@ full_name = "Admin"
 
 | Field | Required | Notes |
 |---|---|---|
-| `name` | no | Display name. Defaults to `"Whatomate"`. |
+| `name` | no | Product name shown in the UI, browser tab and login page. Defaults to `"Whatomate"`. A renamed build shows "Based on Whatomate (AGPL-3.0)" under Settings. |
+| `logo_file` | no | Path to an SVG logo (max 200 KB) on the server, e.g. `/app/uploads/brand/logo.svg`. Replaces the favicon and the sidebar and login logo. If unset or unreadable, the default logo is kept and a warning is logged. |
 | `environment` | yes | `development` \| `staging` \| `production`. Sets debug behavior, forces `cookie.secure=true` in production. |
 | `debug` | no | Verbose logging. |
 | `encryption_key` | **production** | AES-256 key used to encrypt access tokens, SSO client secrets, and other secrets at rest in the DB. Must be 32+ chars. Lose it and you lose stored credentials. |

@@ -919,7 +919,15 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// Serve embedded frontend (SPA)
 	if frontend.IsEmbedded() {
 		lo.Info("Serving embedded frontend", "base_path", basePath)
-		frontendHandler := frontend.Handler(basePath)
+		brand := frontend.Brand{Name: cfg.App.Name}
+		if cfg.App.LogoFile != "" {
+			if logo, err := frontend.LoadLogo(cfg.App.LogoFile); err != nil {
+				lo.Warn("Brand logo not used, keeping the default", "file", cfg.App.LogoFile, "error", err)
+			} else {
+				brand.Logo = logo
+			}
+		}
+		frontendHandler := frontend.Handler(basePath, brand)
 		// Catch-all for frontend routes
 		g.GET("/{path:*}", func(r *fastglue.Request) error {
 			frontendHandler(r.RequestCtx)

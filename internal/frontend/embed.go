@@ -1,10 +1,17 @@
 package frontend
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"html"
 	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -34,26 +41,57 @@ var mimeTypes = map[string]string{
 //go:embed all:dist
 var distFS embed.FS
 
-// cachedIndexHTML stores the modified index.html with injected base path
-var cachedIndexHTML []byte
+// DefaultBrandName is the product name shown when none is configured.
+const DefaultBrandName = "Whatomate"
 
-// Handler returns a fasthttp handler that serves the embedded frontend files
-// basePath should be empty string for root deployment or "/subpath" for subdirectory
-// If frontend is not embedded, returns a handler that shows a helpful message
-func Handler(basePath string) fasthttp.RequestHandler {
-	// Normalize base path
-	basePath = strings.TrimSuffix(basePath, "/")
+// maxLogoSize caps the size of a configured logo file.
+const maxLogoSize = 200 << 10
 
-	// Get the dist subdirectory
-	distSubFS, err := fs.Sub(distFS, "dist")
-	if err != nil {
-		return notEmbeddedHandler("Frontend not embedded: " + err.Error())
+// Brand is the product name and logo shown in the UI.
+type Brand struct {
+	Name string
+	// Logo is an SVG served as the favicon and shown in the UI.
+	// Nil keeps the embedded favicon and the default logo.
+	Logo []byte
+}
+
+// LoadLogo reads an SVG logo file, rejecting files that are too large
+// or do not look like SVG.
+func LoadLogo(path string) ([]byte, error) {
+	if !strings.EqualFold(filepath.Ext(path), ".svg") {
+		return nil, errors.New("logo must be an .svg file")
 	}
-
-	// Read and modify index.html to inject base path
-	indexContent, err := fs.ReadFile(distSubFS, "index.html")
+	info, err := os.Stat(path)
 	if err != nil {
-		return notEmbeddedHandler("Frontend not embedded: index.html not found. Run 'make build-prod' to embed frontend.")
+		return nil, err
+	}
+	if info.Size() > maxLogoSize {
+		return nil, fmt.Errorf("logo is larger than %d KB", maxLogoSize>>10)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxLogoSize {
+		return nil, fmt.Errorf("logo is larger than %d KB", maxLogoSize>>10)
+	}
+	if !bytes.Contains(bytes.ToLower(data), []byte("<svg")) {
+		return nil, errors.New("logo is not an SVG document")
+	}
+	return data, nil
+}
+
+// logoVersion returns a short content hash used to bust browser caches.
+func logoVersion(logo []byte) string {
+	sum := sha256.Sum256(logo)
+	return hex.EncodeToString(sum[:5])
+}
+
+// renderIndex injects the base path and brand into index.html.
+func renderIndex(indexContent []byte, basePath string, brand Brand) []byte {
+	name := brand.Name
+	if name == "" {
+		name = DefaultBrandName
 	}
 
 	// Inject base tag right after <head> so it's processed before any relative URLs
@@ -65,9 +103,49 @@ func Handler(basePath string) fasthttp.RequestHandler {
 	baseTag := fmt.Sprintf(`<head><base href="%s">`, baseHref)
 	modifiedHTML := strings.Replace(string(indexContent), "<head>", baseTag, 1)
 
-	// Inject base path script before </head>
-	basePathScript := fmt.Sprintf(`<script>window.__BASE_PATH__ = "%s";</script></head>`, basePath)
-	cachedIndexHTML = []byte(strings.Replace(modifiedHTML, "</head>", basePathScript, 1))
+	// Brand name in the tab title and description, HTML-escaped
+	escapedName := html.EscapeString(name)
+	modifiedHTML = strings.Replace(modifiedHTML, "<title>"+DefaultBrandName+"</title>", "<title>"+escapedName+"</title>", 1)
+	modifiedHTML = strings.Replace(modifiedHTML, `content="`+DefaultBrandName+` - `, `content="`+escapedName+` - `, 1)
+
+	logoURL := ""
+	if brand.Logo != nil {
+		version := logoVersion(brand.Logo)
+		logoURL = basePath + "/favicon.svg?v=" + version
+		modifiedHTML = strings.Replace(modifiedHTML, `href="./favicon.svg"`, `href="./favicon.svg?v=`+version+`"`, 1)
+		modifiedHTML = strings.Replace(modifiedHTML, `href="/favicon.svg"`, `href="./favicon.svg?v=`+version+`"`, 1)
+	}
+
+	// json.Marshal escapes <, > and & so the values cannot close the script tag
+	brandJSON, _ := json.Marshal(map[string]string{"name": name, "logo": logoURL})
+
+	// Inject base path and brand script before </head>
+	headScript := fmt.Sprintf(`<script>window.__BASE_PATH__ = "%s";window.__BRAND__ = %s;</script></head>`, basePath, brandJSON)
+	return []byte(strings.Replace(modifiedHTML, "</head>", headScript, 1))
+}
+
+// Handler returns a fasthttp handler that serves the embedded frontend files
+// basePath should be empty string for root deployment or "/subpath" for subdirectory
+// If frontend is not embedded, returns a handler that shows a helpful message
+func Handler(basePath string, brand Brand) fasthttp.RequestHandler {
+	// Get the dist subdirectory
+	distSubFS, err := fs.Sub(distFS, "dist")
+	if err != nil {
+		return notEmbeddedHandler("Frontend not embedded: " + err.Error())
+	}
+	return newHandler(distSubFS, basePath, brand)
+}
+
+func newHandler(distSubFS fs.FS, basePath string, brand Brand) fasthttp.RequestHandler {
+	// Normalize base path
+	basePath = strings.TrimSuffix(basePath, "/")
+
+	// Read and modify index.html to inject base path
+	indexContent, err := fs.ReadFile(distSubFS, "index.html")
+	if err != nil {
+		return notEmbeddedHandler("Frontend not embedded: index.html not found. Run 'make build-prod' to embed frontend.")
+	}
+	indexHTML := renderIndex(indexContent, basePath, brand)
 
 	// Create file server
 	fileServer := http.FileServer(http.FS(distSubFS))
@@ -75,6 +153,16 @@ func Handler(basePath string) fasthttp.RequestHandler {
 	// Wrap with SPA fallback and proper MIME types
 	spaHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
+
+		// A configured logo replaces the embedded favicon
+		if brand.Logo != nil && (path == "/favicon.svg" || path == basePath+"/favicon.svg") {
+			w.Header().Set("Content-Type", "image/svg+xml")
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+			w.Header().Set("Cache-Control", "public, max-age=86400")
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(brand.Logo)))
+			_, _ = w.Write(brand.Logo)
+			return
+		}
 
 		// Try to serve the file
 		if path != "/" && !strings.HasPrefix(path, "/api") {
@@ -147,7 +235,7 @@ func Handler(basePath string) fasthttp.RequestHandler {
 		// For root or non-existent files (SPA routes), serve modified index.html
 		if path == "/" || (!strings.HasPrefix(path, "/api") && !strings.Contains(path, ".")) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = w.Write(cachedIndexHTML)
+			_, _ = w.Write(indexHTML)
 			return
 		}
 
