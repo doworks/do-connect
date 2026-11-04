@@ -346,6 +346,10 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
+  function removeMessage(messageId: string) {
+    messages.value = messages.value.filter(m => m.id !== messageId)
+  }
+
   function updateMessageStatus(messageId: string, status: string, errorMessage?: string) {
     const index = messages.value.findIndex(m => m.id === messageId)
     if (index !== -1) {
@@ -433,6 +437,7 @@ export const useContactsStore = defineStore('contacts', () => {
     sendMessage,
     sendTemplate,
     addMessage,
+    removeMessage,
     updateMessageStatus,
     setCurrentContact,
     clearMessages,

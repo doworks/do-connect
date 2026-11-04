@@ -749,13 +749,7 @@ async function retryMessage(message: Message) {
     )
 
     // Remove the failed message from the list after successful retry
-    const messages = (contactsStore.messages as any).get?.(contactsStore.currentContact.id) as Message[] | undefined
-    if (messages) {
-      const index = messages.findIndex((m: Message) => m.id === message.id)
-      if (index !== -1) {
-        messages.splice(index, 1)
-      }
-    }
+    contactsStore.removeMessage(message.id)
 
     toast.success(t('chat.messageSent'))
   } catch (error) {
