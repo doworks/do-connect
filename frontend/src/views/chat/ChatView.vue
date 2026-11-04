@@ -2019,7 +2019,9 @@ async function sendMediaMessage() {
       scrollToBottom()
     }
 
-    toast.success(t('chat.mediaSent'))
+    // Outside the 24 hours the file waits for the patient, as text does.
+    if (result.data?.status === 'held') toast.success(t('chat.mediaHeld'))
+    else toast.success(t('chat.mediaSent'))
     closeMediaDialog()
   } catch (error: any) {
     toast.error(t('chat.mediaFailed'), {
@@ -2842,7 +2844,7 @@ async function sendMediaMessage() {
                 <span v-if="!getMessageContent(message) && !(isMediaMessage(message) && !message.media_url)" class="chat-bubble-time block clear-both">
                   <span>{{ formatMessageTime(message.created_at) }}</span>
                   <component
-                    v-if="message.direction === 'outgoing'"
+                    v-if="message.direction === 'outgoing' && message.status !== 'held'"
                     :is="getMessageStatusIcon(message.status)"
                     :class="['h-4 w-4 status-icon', getMessageStatusClass(message.status)]"
                   />
@@ -3485,15 +3487,29 @@ async function sendMediaMessage() {
             />
           </div>
 
+          <!-- 24-hour window closed: the file waits for the patient, like text -->
+          <p v-if="holdsMessages" class="flex items-start gap-2 text-xs text-amber-400 light:text-amber-700">
+            <Hourglass class="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span>{{ $t('chat.mediaHeldHint') }}</span>
+          </p>
+
           <!-- Actions -->
           <div class="flex justify-end gap-2">
             <Button variant="outline" @click="closeMediaDialog" :disabled="isUploadingMedia">
               {{ $t('common.cancel') }}
             </Button>
-            <Button @click="sendMediaMessage" :disabled="isUploadingMedia">
-              <Send v-if="!isUploadingMedia" class="mr-2 h-4 w-4" />
-              <span v-if="isUploadingMedia">{{ $t('chat.sending') }}...</span>
-              <span v-else>{{ $t('chat.send') }}</span>
+            <Button
+              @click="sendMediaMessage"
+              :disabled="isUploadingMedia"
+              :class="holdsMessages && 'bg-amber-600 hover:bg-amber-500 text-white'"
+            >
+              <template v-if="isUploadingMedia">{{ $t('chat.sending') }}...</template>
+              <template v-else-if="holdsMessages">
+                <Hourglass class="mr-2 h-4 w-4" />{{ $t('chat.sendWhenTheyReply') }}
+              </template>
+              <template v-else>
+                <Send class="mr-2 h-4 w-4" />{{ $t('chat.send') }}
+              </template>
             </Button>
           </div>
         </div>

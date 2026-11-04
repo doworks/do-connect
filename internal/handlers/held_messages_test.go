@@ -1,10 +1,15 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -373,5 +378,140 @@ func TestCancellingHeldMessages(t *testing.T) {
 
 		assert.Equal(t, fasthttp.StatusNotFound, cancel(t, f, contact.ID, held.ID))
 		assert.Equal(t, models.MessageStatusHeld, other.status(t, held.ID).Status)
+	})
+}
+
+// sendFile posts a photo or file from the chat, as the attach button does.
+func (f heldFixture) sendFile(t *testing.T, contact *models.Contact, kind, filename, mimeType, caption string) MessageResponse {
+	t.Helper()
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	require.NoError(t, form.WriteField("contact_id", contact.ID.String()))
+	require.NoError(t, form.WriteField("type", kind))
+	require.NoError(t, form.WriteField("caption", caption))
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", `form-data; name="file"; filename="`+filename+`"`)
+	header.Set("Content-Type", mimeType)
+	part, err := form.CreatePart(header)
+	require.NoError(t, err)
+	_, _ = part.Write([]byte("file-bytes"))
+	require.NoError(t, form.Close())
+
+	req := testutil.NewRequest(t)
+	req.RequestCtx.Request.Header.SetMethod("POST")
+	req.RequestCtx.Request.Header.SetContentType(form.FormDataContentType())
+	req.RequestCtx.Request.SetBody(body.Bytes())
+	testutil.SetAuthContext(req, f.org.ID, f.user.ID)
+	require.NoError(t, f.app.SendMediaMessage(req))
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req), string(testutil.GetResponseBody(req)))
+	var resp struct {
+		Data MessageResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(testutil.GetResponseBody(req), &resp))
+	f.app.WaitForBackgroundTasks()
+	return resp.Data
+}
+
+// sentKinds lists what reached the patient, in order, leaving out the notice.
+func (s *sentToMeta) sentKinds() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	kinds := []string{}
+	for _, message := range s.sent {
+		if kind, _ := message["type"].(string); kind != "template" {
+			kinds = append(kinds, kind)
+		}
+	}
+	return kinds
+}
+
+func TestHoldingPhotosAndFiles(t *testing.T) {
+	withStorage := func(t *testing.T) heldFixture {
+		f := newHeldFixture(t)
+		f.app.Config.Storage.LocalPath = t.TempDir()
+		f.configure(t)
+		return f
+	}
+
+	t.Run("a photo waits and goes out from the saved file when they reply", func(t *testing.T) {
+		f := withStorage(t)
+		contact := f.contact(t)
+
+		held := f.sendFile(t, contact, "image", "xray.jpg", "image/jpeg", "Lower left molar")
+		assert.Equal(t, models.MessageStatusHeld, held.Status)
+		assert.NotEmpty(t, held.MediaURL, "staff see the photo in the chat while it waits")
+		assert.Empty(t, f.meta.ofType("image"))
+		assert.Empty(t, f.meta.uploads, "nothing goes to WhatsApp yet")
+		assert.Len(t, f.meta.ofType("template"), 1)
+
+		f.patientWrites(t, contact, "text", "Hi")
+
+		images := f.meta.ofType("image")
+		require.Len(t, images, 1)
+		assert.Equal(t, "Lower left molar", images[0]["image"].(map[string]any)["caption"])
+		require.Len(t, f.meta.uploads, 1)
+		assert.Contains(t, f.meta.uploads[0], `filename="xray.jpg"`)
+		saved := f.status(t, held.ID)
+		assert.Equal(t, models.MessageStatusSent, saved.Status)
+		assert.NotEmpty(t, saved.WhatsAppMessageID)
+	})
+
+	t.Run("texts and files go out in the order they were written", func(t *testing.T) {
+		f := withStorage(t)
+		contact := f.contact(t)
+		f.send(t, contact, "Here is your report")
+		f.sendFile(t, contact, "document", "report.pdf", "application/pdf", "")
+		f.send(t, contact, "Call us with any questions")
+
+		f.patientWrites(t, contact, "button_reply", "View message")
+
+		assert.Equal(t, []string{"text", "document", "text"}, f.meta.sentKinds())
+		documents := f.meta.ofType("document")
+		require.Len(t, documents, 1)
+		assert.Equal(t, "report.pdf", documents[0]["document"].(map[string]any)["filename"])
+	})
+
+	t.Run("inside the window a photo sends straight away", func(t *testing.T) {
+		f := withStorage(t)
+		sent := f.sendFile(t, f.contact(t, recentlyWrote), "image", "xray.jpg", "image/jpeg", "")
+		assert.NotEqual(t, models.MessageStatusHeld, sent.Status)
+		assert.Len(t, f.meta.ofType("image"), 1)
+		assert.Empty(t, f.meta.ofType("template"))
+	})
+
+	t.Run("without a template set up a photo isn't held", func(t *testing.T) {
+		f := newHeldFixture(t)
+		f.app.Config.Storage.LocalPath = t.TempDir()
+		sent := f.sendFile(t, f.contact(t), "image", "xray.jpg", "image/jpeg", "")
+		assert.NotEqual(t, models.MessageStatusHeld, sent.Status)
+	})
+
+	t.Run("a file that's gone fails instead of sending nothing", func(t *testing.T) {
+		f := withStorage(t)
+		contact := f.contact(t)
+		held := f.sendFile(t, contact, "image", "xray.jpg", "image/jpeg", "")
+		saved := f.status(t, held.ID)
+		require.NoError(t, os.Remove(filepath.Join(f.app.Config.Storage.LocalPath, saved.MediaURL)))
+
+		f.patientWrites(t, contact, "text", "Hi")
+
+		assert.Empty(t, f.meta.ofType("image"))
+		failed := f.status(t, held.ID)
+		assert.Equal(t, models.MessageStatusFailed, failed.Status)
+		assert.Contains(t, failed.ErrorMessage, "no longer saved")
+	})
+
+	t.Run("after 7 days a file isn't sent", func(t *testing.T) {
+		f := withStorage(t)
+		contact := f.contact(t)
+		held := f.sendFile(t, contact, "image", "xray.jpg", "image/jpeg", "")
+		require.NoError(t, f.app.DB.Model(&models.Message{}).Where("id = ?", held.ID).Update("created_at", time.Now().Add(-8*24*time.Hour)).Error)
+
+		f.patientWrites(t, contact, "text", "Hello")
+
+		assert.Empty(t, f.meta.uploads)
+		failed := f.status(t, held.ID)
+		assert.Equal(t, models.MessageStatusFailed, failed.Status)
+		assert.Contains(t, failed.ErrorMessage, "7 days")
 	})
 }

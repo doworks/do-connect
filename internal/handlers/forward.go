@@ -126,16 +126,23 @@ func (a *App) forwardTo(r *fastglue.Request, orgID, userID uuid.UUID, source *mo
 	metadata := models.JSONB{"forwarded_from": source.ID.String()}
 
 	if !serviceWindowOpen(&contact) {
-		if media {
+		template := a.unlockTemplate(&contact, account)
+		if template == nil && media {
 			result.Reason = "They haven't written in 24 hours. Photos and files can only go once they message the clinic."
 			return result
 		}
-		template := a.unlockTemplate(&contact, account)
 		if template == nil {
 			result.Reason = "They haven't written in 24 hours, so only a template can be sent."
 			return result
 		}
-		held, err := a.holdText(&contact, account, template, text, userID, metadata)
+		var held *models.Message
+		if media {
+			// The copy shares the saved file, so it goes out as it is now.
+			held, err = a.holdMedia(&contact, account, template, source.MessageType, text, source.MediaURL,
+				baseMime(source.MediaMimeType), mediaFilename(source), userID, metadata)
+		} else {
+			held, err = a.holdText(&contact, account, template, text, userID, metadata)
+		}
 		if err != nil {
 			result.Reason = "Could not save the message"
 			return result

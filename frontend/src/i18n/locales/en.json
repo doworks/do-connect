@@ -473,6 +473,8 @@
     "sendTemplateInstead": "Send a template instead",
     "sendWhenTheyReply": "Send when they reply",
     "heldNote": "Held. Goes out when they tap View message.",
+    "mediaHeld": "Held. It goes out when they reply.",
+    "mediaHeldHint": "They haven't messaged in the last 24 hours. This goes out as soon as they tap View message or write to you.",
     "cancelHeldFailed": "Could not cancel this message",
     "messageInfo": "Message info",
     "forward": "Forward",

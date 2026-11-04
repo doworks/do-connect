@@ -1044,6 +1044,18 @@ func (a *App) SendMediaMessage(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save media", nil, "")
 	}
 
+	// Outside the 24-hour window a photo or file waits for the patient, as text does.
+	viaKey, _ := r.RequestCtx.UserValue(middleware.ContextKeyViaAPIKey).(bool)
+	if forwardableMedia[models.MessageType(mediaType)] && !viaKey && !serviceWindowOpen(&contact) {
+		if template := a.unlockTemplate(&contact, account); template != nil {
+			held, err := a.holdMedia(&contact, account, template, models.MessageType(mediaType), caption, localPath, mimeType, fileHeader.Filename, userID, nil)
+			if err != nil {
+				return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save the message", nil, "")
+			}
+			return r.SendEnvelope(heldResponse(held))
+		}
+	}
+
 	// Build and send via unified message sender
 	msgReq := OutgoingMessageRequest{
 		Account:       account,

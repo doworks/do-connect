@@ -78,43 +78,66 @@ func (a *App) holdTextMessage(r *fastglue.Request, contact *models.Contact, acco
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to save the message", nil, "")
 	}
+	return r.SendEnvelope(heldResponse(message))
+}
 
+func heldResponse(message *models.Message) MessageResponse {
 	response := MessageResponse{
 		ID:              message.ID,
 		ContactID:       message.ContactID,
 		Direction:       message.Direction,
 		MessageType:     message.MessageType,
 		Content:         map[string]string{"body": message.Content},
+		MediaURL:        messageMediaURL(message),
+		MediaMimeType:   message.MediaMimeType,
+		MediaFilename:   message.MediaFilename,
 		Status:          message.Status,
 		WhatsAppAccount: message.WhatsAppAccount,
 		CreatedAt:       message.CreatedAt,
 		UpdatedAt:       message.UpdatedAt,
 	}
 	applySenderFields(&response, message)
-	return r.SendEnvelope(response)
+	return response
 }
 
 // holdText saves a text to go out when the patient replies, and sends the unlock
 // template unless one went out recently.
 func (a *App) holdText(contact *models.Contact, account *models.WhatsAppAccount, template *models.Template, body string, userID uuid.UUID, metadata models.JSONB) (*models.Message, error) {
-	message := &models.Message{
-		BaseModel:       models.BaseModel{ID: uuid.New()},
-		OrganizationID:  account.OrganizationID,
-		WhatsAppAccount: account.Name,
-		ContactID:       contact.ID,
-		Direction:       models.DirectionOutgoing,
-		MessageType:     models.MessageTypeText,
-		Content:         body,
-		Status:          models.MessageStatusHeld,
-		SentByUserID:    &userID,
-		Metadata:        metadata,
-	}
+	return a.hold(contact, account, template, &models.Message{
+		MessageType: models.MessageTypeText,
+		Content:     body,
+		Metadata:    metadata,
+	}, userID, truncateString(body, 100))
+}
+
+// holdMedia does the same for a photo or file already saved in Whatomate. It
+// keeps the file's name and type, so it goes out as it would have now.
+func (a *App) holdMedia(contact *models.Contact, account *models.WhatsAppAccount, template *models.Template, kind models.MessageType, caption, mediaURL, mimeType, filename string, userID uuid.UUID, metadata models.JSONB) (*models.Message, error) {
+	preview := a.getMessagePreview(OutgoingMessageRequest{Type: kind, Caption: caption, MediaFilename: filename})
+	return a.hold(contact, account, template, &models.Message{
+		MessageType:   kind,
+		Content:       caption,
+		MediaURL:      mediaURL,
+		MediaMimeType: mimeType,
+		MediaFilename: filename,
+		Metadata:      metadata,
+	}, userID, preview)
+}
+
+func (a *App) hold(contact *models.Contact, account *models.WhatsAppAccount, template *models.Template, message *models.Message, userID uuid.UUID, preview string) (*models.Message, error) {
+	message.ID = uuid.New()
+	message.OrganizationID = account.OrganizationID
+	message.WhatsAppAccount = account.Name
+	message.ContactID = contact.ID
+	message.Direction = models.DirectionOutgoing
+	message.Status = models.MessageStatusHeld
+	message.SentByUserID = &userID
 	if err := a.DB.Create(message).Error; err != nil {
 		a.Log.Error("Failed to hold message", "error", err)
 		return nil, err
 	}
 	message.SentByUser = a.senderUser(userID)
-	a.updateContactLastMessage(contact, truncateString(body, 100))
+	a.updateContactLastMessage(contact, preview)
 	a.broadcastNewMessage(account.OrganizationID, message, contact)
 
 	// A second held message doesn't send a second notice.
@@ -184,16 +207,34 @@ func (a *App) releaseHeldMessage(account *models.WhatsAppAccount, contact *model
 	}
 	message.Status = models.MessageStatusPending
 
-	opts := DefaultSendOptions()
-	opts.Async = false
-	opts.SentByUserID = message.SentByUserID
-	opts.ExistingMessage = message
-	if _, err := a.SendOutgoingMessage(context.Background(), OutgoingMessageRequest{
+	req := OutgoingMessageRequest{
 		Account: account,
 		Contact: contact,
 		Type:    message.MessageType,
 		Content: message.Content,
-	}, opts); err != nil {
+	}
+	// A photo or file goes from the copy saved when it was written. Meta wants a
+	// name and a plain type, which a patient's own file may not have.
+	if forwardableMedia[message.MessageType] {
+		data, err := a.readStoredMedia(message.MediaURL)
+		if err != nil {
+			a.finishHeldAsFailed(account, message, "Not sent: the file is no longer saved")
+			return
+		}
+		req.MediaData = data
+		req.MediaURL = message.MediaURL
+		req.MediaMimeType = baseMime(message.MediaMimeType)
+		req.MediaFilename = mediaFilename(message)
+		req.Caption = message.Content
+	}
+
+	opts := DefaultSendOptions()
+	opts.Async = false
+	opts.SentByUserID = message.SentByUserID
+	opts.ExistingMessage = message
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if _, err := a.SendOutgoingMessage(ctx, req, opts); err != nil {
 		a.Log.Error("Failed to release held message", "error", err, "message_id", message.ID)
 	}
 }
