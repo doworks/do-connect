@@ -84,7 +84,7 @@ func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
 	// Parse settings from JSONB
 	settings := OrganizationSettings{
 		MaskPhoneNumbers:    false,
-		Timezone:            "UTC",
+		Timezone:            a.defaultTimezoneName(),
 		DateFormat:          "YYYY-MM-DD",
 		CallingEnabled:      false,
 		MaxCallDuration:     callingConfigDefault(a.Config.Calling.MaxCallDuration, 3600),

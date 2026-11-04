@@ -78,7 +78,8 @@ func TestApp_GetOrganizationSettings_Defaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, false, resp.Data.Settings.MaskPhoneNumbers)
-	assert.Equal(t, "UTC", resp.Data.Settings.Timezone)
+	// Unset, the timezone is the server default.
+	assert.Equal(t, "Asia/Bahrain", resp.Data.Settings.Timezone)
 	assert.Equal(t, "YYYY-MM-DD", resp.Data.Settings.DateFormat)
 }
 

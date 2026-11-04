@@ -810,6 +810,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/analytics/agents", app.GetAgentAnalytics)
 	g.GET("/api/analytics/agents/{id}", app.GetAgentDetails)
 	g.GET("/api/analytics/agents/comparison", app.GetAgentComparison)
+	g.GET("/api/analytics/staff", app.GetStaffReport)
 
 	// Meta WhatsApp Analytics
 	g.GET("/api/analytics/meta", app.GetMetaAnalytics)

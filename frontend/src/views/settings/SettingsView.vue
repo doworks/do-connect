@@ -34,6 +34,9 @@ const canWriteAccounts = computed(() => authStore.hasPermission('accounts', 'wri
 const isSubmitting = ref(false)
 const isLoading = ref(true)
 
+// Zones listed in the timezone picker; any other saved zone is shown as it is.
+const knownTimezones = ['UTC', 'America/New_York', 'America/Los_Angeles', 'Europe/London', 'Asia/Tokyo', 'Asia/Bahrain', 'Asia/Riyadh', 'Asia/Dubai', 'Asia/Kolkata']
+
 // General Settings
 const generalSettings = ref({
   organization_name: 'My Organization',
@@ -307,6 +310,11 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
                         <SelectItem value="America/Los_Angeles" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">Pacific Time</SelectItem>
                         <SelectItem value="Europe/London" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">London</SelectItem>
                         <SelectItem value="Asia/Tokyo" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">Tokyo</SelectItem>
+                        <SelectItem value="Asia/Bahrain" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">Bahrain</SelectItem>
+                        <SelectItem value="Asia/Riyadh" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">Riyadh</SelectItem>
+                        <SelectItem value="Asia/Dubai" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">Dubai</SelectItem>
+                        <SelectItem value="Asia/Kolkata" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">India</SelectItem>
+                        <SelectItem v-if="!knownTimezones.includes(generalSettings.default_timezone)" :value="generalSettings.default_timezone" class="text-white/70 focus:bg-white/[0.08] focus:text-white light:text-gray-700 light:focus:bg-gray-100">{{ generalSettings.default_timezone }}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
