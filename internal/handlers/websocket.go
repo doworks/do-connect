@@ -5,6 +5,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/middleware"
+	"github.com/shridarpatil/whatomate/internal/models"
 	ws "github.com/shridarpatil/whatomate/internal/websocket"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -53,21 +54,36 @@ func (a *App) WebSocketHandler(r *fastglue.Request) error {
 	return nil
 }
 
-// validateWSTokenFn returns a function that validates a JWT token
-// and returns user ID and organization ID.
+// validateWSTokenFn returns a function that validates the short-lived socket
+// token from /auth/ws-token and returns user ID and organization ID. Other
+// tokens signed with the same secret (access or refresh tokens) are refused,
+// and a phone's token only while that phone is still signed in.
 func (a *App) validateWSTokenFn() ws.AuthenticateFn {
 	return func(tokenString string) (uuid.UUID, uuid.UUID, error) {
 		token, err := jwt.ParseWithClaims(tokenString, &middleware.JWTClaims{}, func(token *jwt.Token) (any, error) {
 			return []byte(a.Config.JWT.Secret), nil
-		})
+		}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 
 		if err != nil || !token.Valid {
 			return uuid.Nil, uuid.Nil, err
 		}
 
 		claims, ok := token.Claims.(*middleware.JWTClaims)
-		if !ok {
+		if !ok || claims.Subject != "ws" || claims.ID != "" {
 			return uuid.Nil, uuid.Nil, jwt.ErrTokenInvalidClaims
+		}
+
+		if claims.DeviceID != nil {
+			var active int64
+			if err := a.DB.Model(&models.MobileDevice{}).
+				Joins("JOIN users ON users.id = mobile_devices.user_id AND users.deleted_at IS NULL AND users.is_active = ?", true).
+				Where("mobile_devices.id = ? AND mobile_devices.user_id = ? AND mobile_devices.revoked_at IS NULL", *claims.DeviceID, claims.UserID).
+				Count(&active).Error; err != nil {
+				return uuid.Nil, uuid.Nil, err
+			}
+			if active == 0 {
+				return uuid.Nil, uuid.Nil, jwt.ErrTokenInvalidClaims
+			}
 		}
 
 		return claims.UserID, claims.OrganizationID, nil

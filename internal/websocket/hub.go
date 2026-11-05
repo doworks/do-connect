@@ -281,6 +281,26 @@ func (h *Hub) FilterOnlineUsers(orgID uuid.UUID, userIDs []uuid.UUID) []uuid.UUI
 }
 
 // Register adds a client to the hub via the register channel
+// DisconnectUser closes every live connection a user has, in any organization.
+// Used when their phone is removed or their account is disabled: a browser that
+// is still allowed reconnects on its own, a removed phone can't.
+func (h *Hub) DisconnectUser(userID uuid.UUID) int {
+	h.mu.RLock()
+	var conns []*Client
+	for _, orgClients := range h.clients {
+		for client := range orgClients[userID] {
+			conns = append(conns, client)
+		}
+	}
+	h.mu.RUnlock()
+	for _, client := range conns {
+		if client.conn != nil {
+			_ = client.conn.Close()
+		}
+	}
+	return len(conns)
+}
+
 func (h *Hub) Register(client *Client) {
 	h.register <- client
 }

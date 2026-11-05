@@ -595,6 +595,10 @@ func (a *App) GetWSToken(r *fastglue.Request) error {
 			Subject:   "ws",
 		},
 	}
+	// A phone's socket stops being accepted once the phone is removed.
+	if deviceID, onPhone := middleware.GetDeviceID(r); onPhone {
+		claims.DeviceID = &deviceID
+	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString([]byte(a.Config.JWT.Secret))

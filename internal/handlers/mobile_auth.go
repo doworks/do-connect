@@ -328,6 +328,11 @@ func (a *App) DeleteMobileDevice(r *fastglue.Request) error {
 
 	a.logAudit(device.OrganizationID, userID, "mobile_device", device.ID, models.AuditActionDeleted,
 		map[string]any{"name": device.Name, "user_id": device.UserID.String()}, nil)
+	// Close the person's live connections; their other phones and browsers
+	// reconnect on their own, this one can't.
+	if a.WSHub != nil {
+		a.WSHub.DisconnectUser(device.UserID)
+	}
 
 	return r.SendEnvelope(map[string]string{"message": "Device signed out"})
 }
@@ -363,6 +368,11 @@ func (a *App) revokeMobileDevices(userID, orgID, byUserID uuid.UUID) {
 		"push_token": "",
 	}).Error; err != nil {
 		a.Log.Error("Failed to sign out user's devices", "error", err, "user_id", userID)
+	}
+	// Live connections stay open after a token is revoked; close them so a
+	// removed phone stops receiving messages straight away.
+	if a.WSHub != nil {
+		a.WSHub.DisconnectUser(userID)
 	}
 }
 

@@ -640,3 +640,15 @@ func TestHandleAuthMessage_FailedAuth_DoesNotReceiveBroadcast(t *testing.T) {
 
 	assertNoMessage(t, client)
 }
+
+func TestHub_DisconnectUser_ClosesOnlyThatUsersConnections(t *testing.T) {
+	hub := newTestHub(t)
+	userA, userB, org1, org2 := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	hub.Register(newTestClient(hub, userA, org1))
+	hub.Register(newTestClient(hub, userA, org2))
+	hub.Register(newTestClient(hub, userB, org1))
+	waitForClientCount(t, hub, 3)
+
+	assert.Equal(t, 2, hub.DisconnectUser(userA))
+	assert.Equal(t, 0, hub.DisconnectUser(uuid.New()))
+}
