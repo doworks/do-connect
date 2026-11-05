@@ -115,6 +115,9 @@ udp_port_max = 10100
 # secret = "your-coturn-static-auth-secret"
 # credential_ttl = 86400        # Generated-credential lifetime in seconds (default 86400 = 24h)
 
+[push]
+# fcm_credentials_file = "/etc/whatomate/firebase-service-account.json"
+
 [default_admin]
 email = "admin@admin.com"
 password = "admin"
@@ -250,6 +253,14 @@ Required only if you use WhatsApp voice calling / IVR.
 | `[[calling.ice_servers]]` | One block per STUN/TURN server. STUN-only works in permissive networks; configure TURN for guaranteed connectivity behind strict NAT or corporate firewalls. Each block takes `urls` plus either a static `username`/`credential`, or a `secret` (+ optional `credential_ttl`) for coturn `use-auth-secret` / TURN REST mode — see below. |
 
 For a TURN server running coturn's `use-auth-secret` (TURN REST API) mode, set `secret` to coturn's `static-auth-secret` instead of a static `username`/`credential`. Whatomate then generates short-lived credentials per request (username = expiry timestamp, credential = base64 HMAC-SHA1 of the username keyed by the secret). `credential_ttl` (seconds) sets their lifetime and defaults to `86400` (24h). If both `secret` and a static `username`/`credential` are set, `secret` takes priority.
+
+### `[push]`
+
+Optional. Sends a notification to the mobile app when a new incoming message arrives, through Firebase Cloud Messaging (HTTP v1).
+
+- `fcm_credentials_file` — a service-account key file from your Firebase project (**Project settings → Service accounts → Generate new private key**). The project id is read from the file. Keep it out of version control and readable only by the server. Empty (the default) sends no pushes.
+
+Who is notified: the phones of the chat's assigned user, or, when nobody is assigned, the phones of every active user in the organization who can see unassigned chats (`chat:read` and `contacts:read`). Only signed-in phones that registered a push token (`PUT /api/mobile/push-token`) receive them. Messages the chatbot handles, reactions and outgoing messages notify nobody. Each notification carries the contact's name as title, a short preview (the text, or "Photo", "Document", "Voice message"...) as body, `channel_id = "messages"`, the contact id as `tag` (so a chat's notifications replace each other), lock-screen visibility `PRIVATE`, and `contact_id` / `message_id` as data. Tokens that Firebase reports as no longer valid are cleared. Message text is never logged.
 
 ### `[default_admin]`
 

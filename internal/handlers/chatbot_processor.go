@@ -1675,6 +1675,8 @@ func (a *App) saveIncomingMessageAt(account *models.WhatsAppAccount, contact *mo
 
 	// Broadcast new message via WebSocket
 	a.broadcastNewMessage(account.OrganizationID, &message, contact)
+	// And to the phones of the staff who should answer it.
+	a.pushIncomingMessage(account.OrganizationID, &message, contact)
 
 	// The 24 hours run from when they sent it, so a message that took longer than
 	// that to reach us doesn't open the window.

@@ -30,6 +30,15 @@ type Config struct {
 	Calling      CallingConfig      `koanf:"calling"`
 	TTS          TTSConfig          `koanf:"tts"`
 	Clinic       ClinicConfig       `koanf:"clinic"`
+	Push         PushConfig         `koanf:"push"`
+}
+
+// PushConfig turns on notifications to the mobile app for new incoming
+// messages, sent through Firebase Cloud Messaging. FCMCredentialsFile is a
+// service-account key file from the Firebase console (Project settings >
+// Service accounts). Leave it empty to send no pushes.
+type PushConfig struct {
+	FCMCredentialsFile string `koanf:"fcm_credentials_file"`
 }
 
 // ClinicConfig links the chat's patient panel to a clinic system. Every panel

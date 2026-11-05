@@ -147,6 +147,14 @@ udp_port_max = 10100          # WebRTC UDP port range end
 # secret = ""          # at least 32 characters; the same value on both sides
 # timeout_secs = 20
 
+# Push notifications to the mobile app for new incoming messages (optional),
+# through Firebase Cloud Messaging. Point this at a service-account key file
+# from your Firebase project (Project settings > Service accounts > Generate new
+# private key). Keep that file out of version control and readable only by the
+# server. Leave it empty to send no pushes.
+[push]
+# fcm_credentials_file = "/etc/whatomate/firebase-service-account.json"
+
 # Default admin credentials (only used during initial setup when no users exist)
 [default_admin]
 email = "admin@admin.com"

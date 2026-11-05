@@ -18,6 +18,7 @@ import (
 	"github.com/shridarpatil/whatomate/internal/frontend"
 	"github.com/shridarpatil/whatomate/internal/handlers"
 	"github.com/shridarpatil/whatomate/internal/middleware"
+	"github.com/shridarpatil/whatomate/internal/push"
 	"github.com/shridarpatil/whatomate/internal/queue"
 	"github.com/shridarpatil/whatomate/internal/storage"
 	"github.com/shridarpatil/whatomate/internal/tts"
@@ -239,6 +240,17 @@ func runServer(args []string) {
 			AudioDir:      cfg.Calling.AudioDir,
 		}
 		lo.Info("TTS initialized", "piper", cfg.TTS.PiperBinary, "model", cfg.TTS.PiperModel)
+	}
+
+	// Push notifications to the mobile app (optional)
+	if cfg.Push.FCMCredentialsFile != "" {
+		fcm, err := push.LoadFCM(cfg.Push.FCMCredentialsFile, push.Options{})
+		if err != nil {
+			lo.Error("Push notifications are off: could not load the FCM credentials", "error", err)
+		} else {
+			app.Push = fcm
+			lo.Info("Push notifications on", "fcm_project", fcm.ProjectID())
+		}
 	}
 
 	// Start campaign stats subscriber for real-time WebSocket updates from worker
