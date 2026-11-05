@@ -167,7 +167,7 @@ func (f *FCM) send(ctx context.Context, msg Message, validateOnly bool) error {
 	if err != nil {
 		return fmt.Errorf("fcm send: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode == http.StatusOK {
 		return nil
@@ -303,7 +303,7 @@ func (f *FCM) token(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("push access token: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if resp.StatusCode != http.StatusOK {
 		var e struct {
