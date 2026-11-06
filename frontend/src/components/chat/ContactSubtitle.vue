@@ -12,7 +12,7 @@ const { defaultCountryCode } = useChatSettings()
 </script>
 
 <template>
-  <p class="text-[11px] text-white/50 light:text-gray-500 flex items-center gap-1.5">
+  <p class="text-[11px] text-white/50 light:text-gray-500 flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
     <span dir="ltr">{{ formatPhone(contact.phone_number, defaultCountryCode) }}</span>
     <template v-if="assigneeName(contact)">
       <span class="opacity-40">·</span>

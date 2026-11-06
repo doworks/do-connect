@@ -1910,17 +1910,18 @@ async function sendMediaMessage() {
       <!-- Chat Interface -->
       <template v-else>
         <!-- Chat Header -->
-        <div class="h-14 flex-shrink-0 px-4 border-b border-white/[0.08] light:border-gray-200 flex items-center justify-between bg-[#0f0f10] light:bg-white">
-          <div class="flex items-center gap-2">
-            <Avatar class="h-8 w-8 ring-2 ring-white/[0.1] light:ring-gray-200">
+        <div class="h-14 flex-shrink-0 px-4 border-b border-white/[0.08] light:border-gray-200 flex items-center justify-between gap-2 bg-[#0f0f10] light:bg-white">
+          <!-- One line however narrow: the name first, tags clipped after it. -->
+          <div class="flex items-center gap-2 min-w-0 flex-1">
+            <Avatar class="h-8 w-8 shrink-0 ring-2 ring-white/[0.1] light:ring-gray-200">
               <AvatarImage :src="contactsStore.currentContact.avatar_url" />
               <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contactsStore.currentContact.name || contactsStore.currentContact.phone_number)">
                 {{ getInitials(contactTitle(contactsStore.currentContact)) }}
               </AvatarFallback>
             </Avatar>
-            <div>
-              <div class="flex items-center gap-1.5">
-                <p class="text-sm font-medium text-white light:text-gray-900" dir="auto">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-1.5 min-w-0 overflow-hidden">
+                <p class="text-sm font-medium text-white light:text-gray-900 truncate shrink-0 max-w-full" dir="auto" :title="contactTitle(contactsStore.currentContact)">
                   {{ contactTitle(contactsStore.currentContact) }}
                 </p>
                 <ChatHeaderChips :contact="contactsStore.currentContact" />
@@ -1934,7 +1935,7 @@ async function sendMediaMessage() {
               <ContactSubtitle :contact="contactsStore.currentContact" />
             </div>
           </div>
-          <div class="flex items-center gap-1">
+          <div class="flex items-center gap-1 shrink-0">
             <CallButton
               v-if="contactsStore.currentContact?.phone_number && selectedAccount && isBusinessCallingEnabled"
               :contact-id="contactsStore.currentContact.id"

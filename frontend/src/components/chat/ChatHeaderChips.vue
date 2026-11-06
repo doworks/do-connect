@@ -26,6 +26,6 @@ const tagsStore = useTagsStore()
     v-for="tagName in (contact.tags || []).filter(t => t !== 'Arabic' && t !== 'English').slice(0, 3)"
     :key="tagName"
     :color="tagsStore.getTagByName(tagName)?.color"
-    class="text-[10px] h-4"
+    class="text-[10px] h-4 shrink-0 whitespace-nowrap"
   >{{ tagName }}</TagBadge>
 </template>
