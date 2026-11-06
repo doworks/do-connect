@@ -57,6 +57,7 @@ const WS_TYPE_AUTH = 'auth'
 const WS_TYPE_NEW_MESSAGE = 'new_message'
 const WS_TYPE_STATUS_UPDATE = 'status_update'
 const WS_TYPE_CONTACT_READ_STATE = 'contact_read_state'
+const WS_TYPE_CONTACT_UPDATE = 'contact_update'
 const WS_TYPE_AGENT_TYPING = 'agent_typing'
 const WS_TYPE_SET_CONTACT = 'set_contact'
 const WS_TYPE_PING = 'ping'
@@ -246,6 +247,10 @@ class WebSocketService {
         case WS_TYPE_CONTACT_READ_STATE:
           // Someone opened or re-flagged a chat, so every inbox's badge changes.
           store.scheduleContactsRefresh()
+          break
+        case WS_TYPE_CONTACT_UPDATE:
+          // Renamed or retagged elsewhere, e.g. named after the patient record.
+          store.applyContactUpdate(message.payload)
           break
         case WS_TYPE_AGENT_TRANSFER:
           this.handleAgentTransfer(message.payload)

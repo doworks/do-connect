@@ -438,6 +438,22 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
+  // A chat was renamed or retagged elsewhere: by a colleague, or by an
+  // integration naming it after the customer record.
+  function applyContactUpdate(update: { contact_id: string; name?: string; tags?: string[] }) {
+    const changes: Partial<Contact> = {}
+    if (typeof update.name === 'string') {
+      changes.name = update.name
+      changes.profile_name = update.name
+    }
+    if (Array.isArray(update.tags)) changes.tags = update.tags
+    const contact = contacts.value.find(c => c.id === update.contact_id)
+    if (contact) Object.assign(contact, changes)
+    if (currentContact.value?.id === update.contact_id) {
+      currentContact.value = { ...currentContact.value, ...changes }
+    }
+  }
+
   // Debounce server-side search so each keystroke doesn't fire a request.
   let searchDebounceHandle: ReturnType<typeof setTimeout> | null = null
   watch(searchQuery, (query) => {
@@ -468,6 +484,7 @@ export const useContactsStore = defineStore('contacts', () => {
     isLoadingMoreContacts,
     fetchContacts,
     loadMoreContacts,
+    applyContactUpdate,
     updateContactFromMessage,
     markContactRead,
     scheduleContactsRefresh,

@@ -22,6 +22,13 @@ const (
 	pushSendTimeout = 5 * time.Second
 	pushParallel    = 8
 	pushPreviewMax  = 100
+	// A new chat that an integration names (a clinic system naming it after
+	// the patient on its message.incoming webhook) gets its name a moment
+	// after its first message. Its first notification waits this long for it.
+	pushNameWait = 3 * time.Second
+	pushNamePoll = 200 * time.Millisecond
+	// How recently a chat must have been created to count as new.
+	pushNewChat = time.Minute
 )
 
 type pushDevice struct {
@@ -54,6 +61,7 @@ func (a *App) pushIncomingMessage(orgID uuid.UUID, msg *models.Message, contact 
 	name, phone := contact.ProfileName, contact.PhoneNumber
 	contactID, messageID := contact.ID, msg.ID
 	msgType, content := string(msg.MessageType), msg.Content
+	awaitName := !contact.NameLocked && time.Since(contact.CreatedAt) < pushNewChat && a.integrationNamesChats(orgID)
 
 	a.wg.Add(1)
 	go func() {
@@ -68,6 +76,9 @@ func (a *App) pushIncomingMessage(orgID uuid.UUID, msg *models.Message, contact 
 		}
 		if len(devices) == 0 {
 			return
+		}
+		if awaitName {
+			name = a.waitForChatName(ctx, contactID, name)
 		}
 
 		title := a.pushTitle(orgID, name, phone)
@@ -116,6 +127,47 @@ func (a *App) pushIncomingMessage(orgID uuid.UUID, msg *models.Message, contact 
 		a.Log.Info("Sent new-message push", "contact_id", contactID, "message_id", messageID,
 			"sent", sent, "dropped_tokens", dropped, "failed", failed)
 	}()
+}
+
+// integrationNamesChats reports whether something outside may name new chats:
+// an active webhook that hears about incoming messages.
+func (a *App) integrationNamesChats(orgID uuid.UUID) bool {
+	webhooks, err := a.getWebhooksCached(orgID)
+	if err != nil {
+		return false
+	}
+	for _, webhook := range webhooks {
+		if webhook.IsActive && containsEvent(webhook.Events, string(models.WebhookEventMessageIncoming)) {
+			return true
+		}
+	}
+	return false
+}
+
+// waitForChatName gives an integration a moment to name a new chat, and
+// returns the name it set, or the name the chat already had.
+func (a *App) waitForChatName(ctx context.Context, contactID uuid.UUID, name string) string {
+	deadline := time.NewTimer(pushNameWait)
+	defer deadline.Stop()
+	tick := time.NewTicker(pushNamePoll)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return name
+		case <-deadline.C:
+			return name
+		case <-tick.C:
+			var row struct {
+				ProfileName string
+				NameLocked  bool
+			}
+			if err := a.DB.Model(&models.Contact{}).Select("profile_name, name_locked").
+				Where("id = ?", contactID).Scan(&row).Error; err == nil && row.NameLocked {
+				return row.ProfileName
+			}
+		}
+	}
 }
 
 // pushRecipients lists the phones to notify. Only signed-in phones with a push

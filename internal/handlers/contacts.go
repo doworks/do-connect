@@ -653,6 +653,31 @@ func (a *App) broadcastReadState(orgID, contactID uuid.UUID) {
 	})
 }
 
+// broadcastContactUpdate tells every open inbox and chat that a contact's name
+// or tags changed, so a rename (by staff, or by an integration naming the chat
+// after a customer record) shows at once instead of on the next reload.
+func (a *App) broadcastContactUpdate(orgID uuid.UUID, contact *models.Contact) {
+	if a.WSHub == nil || contact == nil {
+		return
+	}
+	name, _ := a.MaskContactFields(orgID, contact.ProfileName, contact.PhoneNumber)
+	tags := make([]string, 0, len(contact.Tags))
+	for _, tag := range contact.Tags {
+		if s, ok := tag.(string); ok {
+			tags = append(tags, s)
+		}
+	}
+	a.WSHub.BroadcastToOrg(orgID, websocket.WSMessage{
+		Type: websocket.TypeContactUpdate,
+		Payload: map[string]any{
+			"contact_id":   contact.ID.String(),
+			"name":         name,
+			"profile_name": name,
+			"tags":         tags,
+		},
+	})
+}
+
 // markMessagesAsRead marks messages as read and sends read receipts
 func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *models.Contact) {
 	var unreadMessages []models.Message
@@ -1526,6 +1551,7 @@ func (a *App) UpdateContactTags(r *fastglue.Request) error {
 	if err := a.DB.First(contact, contactID).Error; err != nil {
 		a.Log.Error("Failed to reload contact", "error", err)
 	}
+	a.broadcastContactUpdate(orgID, contact)
 
 	// Build response with tag details
 	tags := []string{}
@@ -1737,6 +1763,9 @@ func (a *App) UpdateContact(r *fastglue.Request) error {
 
 	a.logAudit(orgID, userID,
 		"contact", contact.ID, models.AuditActionUpdated, &oldContact, contact)
+	if req.ProfileName != nil || req.Tags != nil {
+		a.broadcastContactUpdate(orgID, contact)
+	}
 
 	return r.SendEnvelope(a.buildContactResponse(contact, orgID))
 }
