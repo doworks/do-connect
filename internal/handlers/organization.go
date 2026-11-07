@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/audit"
+	"github.com/shridarpatil/whatomate/internal/calling"
 	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/database"
 	"github.com/shridarpatil/whatomate/internal/models"
@@ -48,6 +49,9 @@ func callingSettingsSnapshot(settings models.JSONB) map[string]any {
 		"transfer_timeout_secs": settings["transfer_timeout_secs"],
 		"hold_music_file":       settings["hold_music_file"],
 		"ringback_file":         settings["ringback_file"],
+		"incoming_call_mode":    settings["incoming_call_mode"],
+		"ring_no_answer":        settings["ring_no_answer"],
+		"waiting_sound":         settings["waiting_sound"],
 	}
 }
 
@@ -64,9 +68,20 @@ type OrganizationSettings struct {
 	TransferTimeoutSecs int    `json:"transfer_timeout_secs"`
 	HoldMusicFile       string `json:"hold_music_file"`
 	RingbackFile        string `json:"ringback_file"`
-	MetaAppID           string `json:"meta_app_id"`
-	MetaConfigID        string `json:"meta_config_id"`
-	HasMetaAppSecret    bool   `json:"has_meta_app_secret"`
+	// IncomingCallMode is "answer" (answer at once, then ring staff while the
+	// caller hears WaitingSound) or "ring" (keep the caller's phone ringing
+	// until someone picks up; see calling.RingWindow).
+	IncomingCallMode string `json:"incoming_call_mode"`
+	// RingNoAnswer is what "ring" mode does when nobody picks up in time:
+	// "hold" answers and plays WaitingSound while staff keep being rung,
+	// "missed" leaves it as a missed call.
+	RingNoAnswer string `json:"ring_no_answer"`
+	// WaitingSound is what a caller hears while staff are rung: "ringing"
+	// (the ringback tone) or "music" (hold music). Empty prefers ringing.
+	WaitingSound     string `json:"waiting_sound"`
+	MetaAppID        string `json:"meta_app_id"`
+	MetaConfigID     string `json:"meta_config_id"`
+	HasMetaAppSecret bool   `json:"has_meta_app_secret"`
 }
 
 // GetOrganizationSettings returns the organization settings
@@ -91,6 +106,8 @@ func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
 		TransferTimeoutSecs: callingConfigDefault(a.Config.Calling.TransferTimeoutSecs, 60),
 		HoldMusicFile:       a.Config.Calling.HoldMusicFile,
 		RingbackFile:        a.Config.Calling.RingbackFile,
+		IncomingCallMode:    calling.IncomingAnswer,
+		RingNoAnswer:        calling.NoAnswerHold,
 	}
 
 	if org.Settings != nil {
@@ -126,6 +143,15 @@ func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
 		}
 		if v, ok := org.Settings["ringback_file"].(string); ok && v != "" {
 			settings.RingbackFile = v
+		}
+		if v, ok := org.Settings["incoming_call_mode"].(string); ok && calling.ValidIncomingMode(v) {
+			settings.IncomingCallMode = v
+		}
+		if v, ok := org.Settings["ring_no_answer"].(string); ok && calling.ValidNoAnswer(v) {
+			settings.RingNoAnswer = v
+		}
+		if v, ok := org.Settings["waiting_sound"].(string); ok && calling.ValidWaitingSound(v) {
+			settings.WaitingSound = v
 		}
 		if v, ok := org.Settings["meta_app_id"].(string); ok && v != "" {
 			settings.MetaAppID = v
@@ -164,6 +190,9 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 		TransferTimeoutSecs *int    `json:"transfer_timeout_secs"`
 		HoldMusicFile       *string `json:"hold_music_file"`
 		RingbackFile        *string `json:"ringback_file"`
+		IncomingCallMode    *string `json:"incoming_call_mode"`
+		RingNoAnswer        *string `json:"ring_no_answer"`
+		WaitingSound        *string `json:"waiting_sound"`
 		MetaAppID           *string `json:"meta_app_id"`
 		MetaConfigID        *string `json:"meta_config_id"`
 		MetaAppSecret       *string `json:"meta_app_secret"`
@@ -192,7 +221,17 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 
 	// Track which tabs received updates so we only audit the relevant ones.
 	generalTouched := req.MaskPhoneNumbers != nil || req.DefaultCountryCode != nil || req.UnlockTemplateEN != nil || req.UnlockTemplateAR != nil || req.Timezone != nil || req.DateFormat != nil || (req.Name != nil && *req.Name != "") || metaAppCredsTouched
-	callingTouched := req.CallingEnabled != nil || req.MaxCallDuration != nil || req.TransferTimeoutSecs != nil || req.HoldMusicFile != nil || req.RingbackFile != nil
+	callingTouched := req.CallingEnabled != nil || req.MaxCallDuration != nil || req.TransferTimeoutSecs != nil || req.HoldMusicFile != nil || req.RingbackFile != nil ||
+		req.IncomingCallMode != nil || req.RingNoAnswer != nil || req.WaitingSound != nil
+	if req.IncomingCallMode != nil && !calling.ValidIncomingMode(*req.IncomingCallMode) {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Choose how incoming calls are answered", nil, "")
+	}
+	if req.RingNoAnswer != nil && !calling.ValidNoAnswer(*req.RingNoAnswer) {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Choose what happens when nobody answers", nil, "")
+	}
+	if req.WaitingSound != nil && !calling.ValidWaitingSound(*req.WaitingSound) {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Choose what callers hear while they wait", nil, "")
+	}
 
 	// Update settings
 	if org.Settings == nil {
@@ -231,6 +270,15 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 	}
 	if req.RingbackFile != nil {
 		org.Settings["ringback_file"] = *req.RingbackFile
+	}
+	if req.IncomingCallMode != nil {
+		org.Settings["incoming_call_mode"] = *req.IncomingCallMode
+	}
+	if req.RingNoAnswer != nil {
+		org.Settings["ring_no_answer"] = *req.RingNoAnswer
+	}
+	if req.WaitingSound != nil {
+		org.Settings["waiting_sound"] = *req.WaitingSound
 	}
 	if req.MetaAppID != nil {
 		org.Settings["meta_app_id"] = *req.MetaAppID

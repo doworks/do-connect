@@ -99,6 +99,8 @@ func (m *Manager) getOrgCallingSettingsCached(orgID uuid.UUID) orgCallingSetting
 		TransferTimeoutSecs: m.config.TransferTimeoutSecs,
 		HoldMusicFile:       m.config.AudioDir + "/" + m.config.HoldMusicFile,
 		RingbackFile:        "",
+		IncomingCallMode:    IncomingAnswer,
+		RingNoAnswer:        NoAnswerHold,
 	}
 	if m.config.RingbackFile != "" {
 		s.RingbackFile = m.config.AudioDir + "/" + m.config.RingbackFile
@@ -149,6 +151,15 @@ func (m *Manager) applyOrgOverrides(s *orgCallingSettings, settings map[string]a
 	}
 	if v, ok := settings["ringback_file"].(string); ok && v != "" {
 		s.RingbackFile = m.config.AudioDir + "/" + v
+	}
+	if v, ok := settings["incoming_call_mode"].(string); ok && ValidIncomingMode(v) {
+		s.IncomingCallMode = v
+	}
+	if v, ok := settings["ring_no_answer"].(string); ok && ValidNoAnswer(v) {
+		s.RingNoAnswer = v
+	}
+	if v, ok := settings["waiting_sound"].(string); ok && ValidWaitingSound(v) {
+		s.WaitingSound = v
 	}
 }
 

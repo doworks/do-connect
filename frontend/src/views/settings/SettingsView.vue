@@ -17,6 +17,7 @@ import { usersService, organizationService } from '@/services/api'
 import { useAuthStore, type CallRingtone } from '@/stores/auth'
 import { previewRingtone } from '@/lib/ringtone'
 import { isRebranded } from '@/lib/brand'
+import IncomingCallChoice from '@/components/calling/IncomingCallChoice.vue'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -67,7 +68,10 @@ const callingSettings = ref({
   max_call_duration: 300,
   transfer_timeout_secs: 120,
   hold_music_file: '',
-  ringback_file: ''
+  ringback_file: '',
+  incoming_call_mode: 'answer',
+  ring_no_answer: 'hold',
+  waiting_sound: ''
 })
 
 const isUploadingHoldMusic = ref(false)
@@ -118,7 +122,10 @@ onMounted(async () => {
         max_call_duration: orgData.settings?.max_call_duration || 300,
         transfer_timeout_secs: orgData.settings?.transfer_timeout_secs || 120,
         hold_music_file: orgData.settings?.hold_music_file || '',
-        ringback_file: orgData.settings?.ringback_file || ''
+        ringback_file: orgData.settings?.ringback_file || '',
+        incoming_call_mode: orgData.settings?.incoming_call_mode || 'answer',
+        ring_no_answer: orgData.settings?.ring_no_answer || 'hold',
+        waiting_sound: orgData.settings?.waiting_sound || ''
       }
     }
 
@@ -203,7 +210,10 @@ async function saveCallingSettings() {
     await organizationService.updateSettings({
       calling_enabled: callingSettings.value.calling_enabled,
       max_call_duration: callingSettings.value.max_call_duration,
-      transfer_timeout_secs: callingSettings.value.transfer_timeout_secs
+      transfer_timeout_secs: callingSettings.value.transfer_timeout_secs,
+      incoming_call_mode: callingSettings.value.incoming_call_mode,
+      ring_no_answer: callingSettings.value.ring_no_answer,
+      waiting_sound: callingSettings.value.waiting_sound
     })
     toast.success(t('settings.callingSaved'))
     refreshActivityLog(callingLogKey)
@@ -531,6 +541,15 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
                   <span class="flex items-center gap-2 font-medium text-white light:text-gray-900"><Clock class="h-4 w-4 text-emerald-400 light:text-emerald-700" />{{ $t('callHours.settingsLink') }}</span>
                   <ChevronRight class="h-4 w-4 text-white/40 light:text-gray-400" />
                 </RouterLink>
+                <Separator class="bg-white/[0.08] light:bg-gray-200" />
+                <IncomingCallChoice
+                  v-model:mode="callingSettings.incoming_call_mode"
+                  v-model:no-answer="callingSettings.ring_no_answer"
+                  v-model:waiting-sound="callingSettings.waiting_sound"
+                  :has-hold-music="!!callingSettings.hold_music_file"
+                  :has-ringback="!!callingSettings.ringback_file"
+                  :class="{ 'opacity-50 pointer-events-none': !callingSettings.calling_enabled }"
+                />
                 <Separator class="bg-white/[0.08] light:bg-gray-200" />
                 <div class="grid grid-cols-2 gap-4" :class="{ 'opacity-50 pointer-events-none': !callingSettings.calling_enabled }">
                   <div class="space-y-2">

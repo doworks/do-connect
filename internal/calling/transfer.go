@@ -36,13 +36,13 @@ func (m *Manager) initiateTransfer(session *CallSession, waAccount string, teamT
 	// initiated a call, hold music feels right only after they've been
 	// explicitly told they're on hold. Falls back to hold music if no
 	// ringback asset is configured.
-	ringFile := orgSettings.transferRingFile()
-	go func() {
-		if ringFile == "" {
-			return
-		}
-		_ = player.PlayFileLoop(ringFile)
-	}()
+	//
+	// A call still ringing on the caller's side hears nothing from us: no
+	// media may flow before it is accepted. answerPending's caller starts the
+	// sound if it answers before anyone picks up.
+	if !session.awaitingAnswer() {
+		m.playWaitingSound(session, orgSettings)
+	}
 
 	var teamID *uuid.UUID
 	if teamTarget != "" {
@@ -517,6 +517,16 @@ func (m *Manager) ConnectAgentToTransfer(transferID, agentID uuid.UUID, sdpOffer
 		"id":       transferID.String(),
 		"agent_id": agentID.String(),
 	})
+
+	// A call still ringing on the caller's side is answered now, as this
+	// staff member picks up. Too late (the caller hung up, or Meta's answer
+	// deadline passed) means there is no call to join.
+	if err := m.answerPending(session); err != nil {
+		m.log.Error("Failed to answer the ringing call for the agent", "error", err, "call_id", session.ID, "agent_id", agentID)
+		m.declineIfRinging(session)
+		m.cleanupSession(session.ID)
+		return "", fmt.Errorf("the call ended before it could be answered")
+	}
 
 	// Create PeerConnection for agent (reuses same codec config)
 	agentPC, err := m.createPeerConnection()

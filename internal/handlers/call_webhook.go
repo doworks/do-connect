@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/calling"
 	"github.com/shridarpatil/whatomate/internal/contactutil"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/websocket"
@@ -194,14 +195,19 @@ func (a *App) processCallWebhook(phoneNumberID string, call any) {
 			return
 		}
 
-		// Update call status to answered
-		a.DB.Model(callLog).Updates(map[string]any{
-			"status":      models.CallStatusAnswered,
-			"answered_at": now,
-		})
+		// In "ring" mode the call keeps ringing until staff pick up, and the
+		// call manager marks it answered then. Otherwise it is answered now.
+		handled := a.IsCallingEnabledForOrg(account.OrganizationID) && sdpOffer != ""
+		ringing := handled && a.CallManager.IncomingCallMode(account.OrganizationID) == calling.IncomingRing
+		if !ringing {
+			a.DB.Model(callLog).Updates(map[string]any{
+				"status":      models.CallStatusAnswered,
+				"answered_at": now,
+			})
+		}
 
 		// Delegate to CallManager with the SDP offer.
-		if a.IsCallingEnabledForOrg(account.OrganizationID) && sdpOffer != "" {
+		if handled {
 			session := a.CallManager.GetSession(ce.ID)
 			if session == nil {
 				var stickyAgentID *uuid.UUID
@@ -214,12 +220,13 @@ func (a *App) processCallWebhook(phoneNumberID string, call any) {
 				a.CallManager.HandleCallEvent(ce.ID, ce.Event)
 			}
 		}
-
-		a.broadcastCallEvent(account.OrganizationID, websocket.TypeCallAnswered, map[string]any{
-			"call_id":     ce.ID,
-			"contact_id":  contact.ID.String(),
-			"answered_at": now.Format(time.RFC3339),
-		})
+		if !ringing {
+			a.broadcastCallEvent(account.OrganizationID, websocket.TypeCallAnswered, map[string]any{
+				"call_id":     ce.ID,
+				"contact_id":  contact.ID.String(),
+				"answered_at": now.Format(time.RFC3339),
+			})
+		}
 
 	case "in_call":
 		// Update call status to answered
@@ -258,9 +265,10 @@ func (a *App) processCallWebhook(phoneNumberID string, call any) {
 		// an agent (no transfer connected), mark as missed instead of completed.
 		// A click-to-call call counts as missed even while it reads as
 		// "transferring": that status just means its one agent was being rung.
+		// A call that kept ringing and was never answered is missed too.
 		finalStatus := models.CallStatusCompleted
 		if callLog.Direction == models.CallDirectionIncoming && callLog.AgentID == nil &&
-			(callLog.StickyAgentID != nil || callLog.Status != models.CallStatusTransferring) {
+			(callLog.StickyAgentID != nil || callLog.Status != models.CallStatusTransferring || callLog.AnsweredAt == nil) {
 			finalStatus = models.CallStatusMissed
 		}
 

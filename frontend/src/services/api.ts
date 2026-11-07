@@ -819,6 +819,9 @@ export const organizationService = {
     transfer_timeout_secs?: number
     hold_music_file?: string
     ringback_file?: string
+    incoming_call_mode?: string
+    ring_no_answer?: string
+    waiting_sound?: string
     meta_app_id?: string
     meta_config_id?: string
     meta_app_secret?: string

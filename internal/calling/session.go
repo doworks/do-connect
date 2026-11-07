@@ -78,6 +78,14 @@ type CallSession struct {
 	// assigned_user_id).
 	StickyAgentID *uuid.UUID
 
+	// A call answered in "ring" mode is only pre-accepted: the caller's phone
+	// keeps ringing until answerPending accepts it with PendingAnswerSDP.
+	// MediaConnected closes when the media path is up.
+	AwaitingAccept   bool
+	PendingAnswerSDP string
+	MediaConnected   chan struct{}
+	acceptMu         sync.Mutex
+
 	// Outgoing call fields
 	Direction      models.CallDirection
 	AgentID        uuid.UUID
@@ -258,6 +266,8 @@ func (m *Manager) HandleCallEvent(callID, event string) {
 	case "in_call", "connect":
 		session.Status = models.CallStatusAnswered
 	case "ended", "terminate", "missed", "unanswered":
+		// The caller hung up: there is nothing left to decline.
+		session.AwaitingAccept = false
 		switch session.TransferStatus {
 		case models.CallTransferStatusWaiting:
 			action = "hangup_transfer"
@@ -311,6 +321,9 @@ type orgCallingSettings struct {
 	MaskPhoneNumbers    bool
 	HoldMusicFile       string
 	RingbackFile        string
+	IncomingCallMode    string // IncomingAnswer or IncomingRing
+	RingNoAnswer        string // NoAnswerHold or NoAnswerMissed
+	WaitingSound        string // "", WaitingRinging or WaitingMusic
 }
 
 // transferRingFile returns the audio file the caller should hear while a
@@ -318,7 +331,13 @@ type orgCallingSettings struct {
 // like "we're connecting you", closer to what a customer expects) and
 // falls back to HoldMusicFile when no ringback asset is configured for
 // the org. Empty string ⇒ silence.
+//
+// The organization can choose hold music instead (WaitingSound); either
+// choice falls back to the other file when its own isn't set up.
 func (s orgCallingSettings) transferRingFile() string {
+	if s.WaitingSound == WaitingMusic && s.HoldMusicFile != "" {
+		return s.HoldMusicFile
+	}
 	if s.RingbackFile != "" {
 		return s.RingbackFile
 	}
@@ -400,6 +419,10 @@ func (m *Manager) cleanupSession(callID string) {
 	session.TransferDone = nil
 
 	session.mu.Unlock()
+
+	// A call that was never answered is declined, so the caller's phone stops
+	// ringing and shows it as not answered.
+	m.declineIfRinging(session)
 
 	// Close TransferDone to unblock any waiting IVR goroutine
 	if transferDone != nil {

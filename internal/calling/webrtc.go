@@ -86,6 +86,9 @@ func (m *Manager) negotiateWebRTC(session *CallSession, account *models.WhatsApp
 
 	// Channel to signal when the WebRTC connection is established
 	connected := make(chan struct{})
+	session.mu.Lock()
+	session.MediaConnected = connected
+	session.mu.Unlock()
 
 	// Handle connection state changes
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
@@ -146,6 +149,20 @@ func (m *Manager) negotiateWebRTC(session *CallSession, account *models.WhatsApp
 		return
 	}
 
+	// "Ring" mode: leave the caller's phone ringing and ring staff now. The
+	// call is accepted when someone picks up (ConnectAgentToTransfer), or when
+	// the ring window runs out and the organization chose to hold callers.
+	if m.IncomingCallMode(session.OrganizationID) == IncomingRing {
+		session.mu.Lock()
+		session.AwaitingAccept = true
+		session.PendingAnswerSDP = sdpAnswer
+		session.mu.Unlock()
+		m.log.Info("Call pre-accepted; ringing staff while the caller's phone rings", "call_id", session.ID)
+		go m.initiateTransfer(session, session.AccountName, "", nil)
+		m.startRingWindow(session)
+		return
+	}
+
 	// Step 4: Accept with the same SDP answer
 	if err := m.whatsapp.AcceptCall(ctx, waAccount, session.ID, sdpAnswer); err != nil {
 		m.log.Error("Failed to accept call via API", "error", err, "call_id", session.ID)
@@ -186,7 +203,12 @@ func (m *Manager) negotiateWebRTC(session *CallSession, account *models.WhatsApp
 	// Start IVR flow if configured
 	if session.IVRFlow != nil {
 		go m.runIVRFlow(session, waAccount)
+		return
 	}
+
+	// No IVR flow: ring staff directly. Without this nobody could pick the
+	// call up — staff only ever see calls offered through a transfer.
+	go m.initiateTransfer(session, session.AccountName, "", nil)
 }
 
 // peerGone reports whether a peer connection state means the far end is no

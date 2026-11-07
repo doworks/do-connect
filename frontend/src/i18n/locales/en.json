@@ -2873,5 +2873,23 @@
       "campaign": "Campaigns",
       "other": "Chatbot and phone app"
     }
+  },
+  "callAnswer": {
+    "title": "When a patient calls",
+    "subtitle": "Whether the call is answered at once, or keeps ringing on the patient's phone until someone at the clinic picks up.",
+    "answer": "Answer straight away",
+    "answerHint": "The call connects at once, and the patient hears the sound below while staff are rung. Menus (IVR flows) play here.",
+    "ring": "Keep ringing until a staff member answers",
+    "ringHint": "The patient's phone keeps ringing while staff are rung. WhatsApp allows this for about 25 seconds.",
+    "noAnswerTitle": "If nobody picks up in time:",
+    "noAnswerHold": "Answer, and play the sound below while staff keep being rung",
+    "noAnswerMissed": "Leave it as a missed call",
+    "noMenus": "Menus (IVR flows) don't play in this mode: nothing reaches the patient before someone answers.",
+    "soundTitle": "While they wait, the patient hears:",
+    "soundRinging": "Ringing tone",
+    "soundMusic": "Hold music",
+    "soundMissing": "Upload a ringback tone or hold music below, or the patient hears silence.",
+    "noMusicYet": "No hold music uploaded yet, so the ringing tone plays until you upload some below.",
+    "noRingingYet": "No ringing tone uploaded yet, so the hold music plays until you upload one below."
   }
 }
