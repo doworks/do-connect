@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pion/webrtc/v4"
 	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/websocket"
@@ -273,6 +274,22 @@ func TestRingingCall(t *testing.T) {
 		assert.Contains(t, err.Error(), "ended before it could be answered")
 		assert.Equal(t, []string{"accept", "reject"}, f.api.sent())
 		assert.Nil(t, f.m.GetSession(f.session.ID))
+	})
+
+	t.Run("a call whose audio WhatsApp already dropped isn't answered into silence", func(t *testing.T) {
+		f := newRingFixture(t, ring)
+		pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+		require.NoError(t, err)
+		require.NoError(t, pc.Close())
+		f.session.mu.Lock()
+		f.session.PeerConnection = pc
+		f.session.mu.Unlock()
+
+		_, err = f.m.ConnectAgentToTransfer(f.session.TransferID, uuid.New(), "v=0")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ended before it could be answered")
+		assert.Equal(t, []string{"reject"}, f.api.sent(), "declined, never accepted")
+		assert.Nil(t, f.reloadLog(t).AnsweredAt)
 	})
 
 	t.Run("staff picking up answers the call before joining it", func(t *testing.T) {

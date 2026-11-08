@@ -105,6 +105,15 @@ func (m *Manager) negotiateWebRTC(session *CallSession, account *models.WhatsApp
 			}
 		case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateDisconnected:
 			m.EndCall(session.ID)
+		case webrtc.PeerConnectionStateClosed:
+			// WhatsApp sometimes drops a call's audio while it is still
+			// ringing. Answering it then would put staff on a silent line,
+			// so it ends as if the caller had hung up: declined, and every
+			// phone stops ringing.
+			if session.awaitingAnswer() {
+				m.log.Warn("WhatsApp closed the call's audio before it was answered; ending it", "call_id", session.ID)
+				go m.HandleCallerHangupDuringTransfer(session)
+			}
 		}
 	})
 
@@ -303,6 +312,7 @@ func (m *Manager) createPeerConnection() (*webrtc.PeerConnection, error) {
 
 	// Configure UDP port range and build API
 	settingEngine := webrtc.SettingEngine{}
+	settingEngine.LoggerFactory = pionLogs{log: m.log}
 	portMin := m.config.UDPPortMin
 	portMax := m.config.UDPPortMax
 	if portMin == 0 {

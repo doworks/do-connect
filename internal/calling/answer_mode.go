@@ -2,9 +2,11 @@ package calling
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pion/webrtc/v4"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/internal/websocket"
 )
@@ -34,6 +36,9 @@ const (
 	// WaitingMusic plays the hold music instead.
 	WaitingMusic = "music"
 )
+
+// errCallAudioGone: WhatsApp closed the call's audio before it was answered.
+var errCallAudioGone = errors.New("the call's audio dropped before it was answered")
 
 // RingWindow is how long a ringing call waits for staff before RingNoAnswer
 // applies. It stays inside Meta's answer deadline with room for the accept
@@ -78,7 +83,16 @@ func (m *Manager) answerPending(session *CallSession) error {
 	sdp := session.PendingAnswerSDP
 	account := session.WAAccount
 	media := session.MediaConnected
+	pc := session.PeerConnection
 	session.mu.Unlock()
+
+	// The caller's audio is already gone: answering would only open a
+	// silent line.
+	if pc != nil {
+		if state := pc.ConnectionState(); state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
+			return errCallAudioGone
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
