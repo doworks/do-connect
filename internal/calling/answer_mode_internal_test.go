@@ -292,6 +292,36 @@ func TestRingingCall(t *testing.T) {
 		assert.Nil(t, f.reloadLog(t).AnsweredAt)
 	})
 
+	t.Run("a quick pick-up waits for WhatsApp to confirm the pre-accept, then answers", func(t *testing.T) {
+		f := newRingFixture(t, ring)
+		preAccepted := make(chan struct{})
+		f.session.mu.Lock()
+		f.session.PreAccepted = preAccepted
+		f.session.mu.Unlock()
+
+		done := make(chan error, 1)
+		go func() { done <- f.m.answerPending(f.session) }()
+		time.Sleep(150 * time.Millisecond)
+		assert.Empty(t, f.api.sent(), "not accepted before the pre-accept is confirmed")
+
+		close(preAccepted)
+		require.NoError(t, <-done)
+		assert.Equal(t, []string{"accept"}, f.api.sent())
+	})
+
+	t.Run("a pre-accept WhatsApp refused is never accepted", func(t *testing.T) {
+		f := newRingFixture(t, ring)
+		preAccepted := make(chan struct{})
+		f.session.mu.Lock()
+		f.session.PreAccepted = preAccepted
+		f.session.PreAcceptErr = assert.AnError
+		f.session.mu.Unlock()
+		close(preAccepted)
+
+		require.Error(t, f.m.answerPending(f.session))
+		assert.Empty(t, f.api.sent())
+	})
+
 	t.Run("staff picking up answers the call before joining it", func(t *testing.T) {
 		f := newRingFixture(t, ring)
 		// The agent's browser offer is junk here, so joining fails after the

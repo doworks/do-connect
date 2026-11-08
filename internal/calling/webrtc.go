@@ -151,24 +151,40 @@ func (m *Manager) negotiateWebRTC(session *CallSession, account *models.WhatsApp
 
 	sdpAnswer := localDesc.SDP
 
+	// "Ring" mode: leave the caller's phone ringing and ring staff now. The
+	// call is accepted when someone picks up (ConnectAgentToTransfer), or when
+	// the ring window runs out and the organization chose to hold callers.
+	// Staff are rung at once, while WhatsApp takes its second or two to
+	// confirm the pre-accept; answering waits for that confirmation.
+	if m.IncomingCallMode(session.OrganizationID) == IncomingRing {
+		preAccepted := make(chan struct{})
+		session.mu.Lock()
+		session.AwaitingAccept = true
+		session.PendingAnswerSDP = sdpAnswer
+		session.PreAccepted = preAccepted
+		session.mu.Unlock()
+		go m.initiateTransfer(session, session.AccountName, "", nil)
+		m.startRingWindow(session)
+
+		err := m.whatsapp.PreAcceptCall(ctx, waAccount, session.ID, sdpAnswer)
+		session.mu.Lock()
+		session.PreAcceptErr = err
+		session.mu.Unlock()
+		close(preAccepted)
+		if err != nil {
+			m.log.Error("Failed to pre-accept call", "error", err, "call_id", session.ID)
+			m.rejectCall(ctx, waAccount, session.ID)
+			m.HandleCallerHangupDuringTransfer(session)
+			return
+		}
+		m.log.Info("Call pre-accepted; ringing staff while the caller's phone rings", "call_id", session.ID)
+		return
+	}
+
 	// Step 3: Pre-accept with our SDP answer
 	if err := m.whatsapp.PreAcceptCall(ctx, waAccount, session.ID, sdpAnswer); err != nil {
 		m.log.Error("Failed to pre-accept call", "error", err, "call_id", session.ID)
 		m.rejectCall(ctx, waAccount, session.ID)
-		return
-	}
-
-	// "Ring" mode: leave the caller's phone ringing and ring staff now. The
-	// call is accepted when someone picks up (ConnectAgentToTransfer), or when
-	// the ring window runs out and the organization chose to hold callers.
-	if m.IncomingCallMode(session.OrganizationID) == IncomingRing {
-		session.mu.Lock()
-		session.AwaitingAccept = true
-		session.PendingAnswerSDP = sdpAnswer
-		session.mu.Unlock()
-		m.log.Info("Call pre-accepted; ringing staff while the caller's phone rings", "call_id", session.ID)
-		go m.initiateTransfer(session, session.AccountName, "", nil)
-		m.startRingWindow(session)
 		return
 	}
 

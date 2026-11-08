@@ -84,7 +84,24 @@ func (m *Manager) answerPending(session *CallSession) error {
 	account := session.WAAccount
 	media := session.MediaConnected
 	pc := session.PeerConnection
+	preAccepted := session.PreAccepted
 	session.mu.Unlock()
+
+	// Staff are rung while WhatsApp confirms the pre-accept; accepting before
+	// that confirmation would be refused.
+	if preAccepted != nil {
+		select {
+		case <-preAccepted:
+		case <-time.After(10 * time.Second):
+			return errors.New("WhatsApp didn't confirm the call in time")
+		}
+		session.mu.Lock()
+		err := session.PreAcceptErr
+		session.mu.Unlock()
+		if err != nil {
+			return errCallAudioGone
+		}
+	}
 
 	// The caller's audio is already gone: answering would only open a
 	// silent line.

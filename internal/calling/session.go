@@ -84,7 +84,12 @@ type CallSession struct {
 	AwaitingAccept   bool
 	PendingAnswerSDP string
 	MediaConnected   chan struct{}
-	acceptMu         sync.Mutex
+	// PreAccepted closes once WhatsApp has answered the pre-accept, with
+	// PreAcceptErr set if it refused. Staff are rung before that, so a quick
+	// pick-up waits for it before accepting.
+	PreAccepted  chan struct{}
+	PreAcceptErr error
+	acceptMu     sync.Mutex
 
 	// Outgoing call fields
 	Direction      models.CallDirection
