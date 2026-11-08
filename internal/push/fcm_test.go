@@ -126,6 +126,27 @@ func TestFCMSendsTheMessage(t *testing.T) {
 	assert.Equal(t, g.tokenSrv.URL, claims["aud"])
 }
 
+// An incoming call wakes the app silently, so it can show its own ringing
+// screen, and is dropped if the phone can't get it while the call lasts.
+func TestFCMSilentShortLivedMessage(t *testing.T) {
+	g := newFakeGoogle(t)
+	f := g.client(t, nil)
+
+	err := f.Send(context.Background(), push.Message{
+		Token: "device-token", Silent: true, TTL: 30 * time.Second,
+		Data: map[string]string{"type": "call", "transfer_id": "t-1"},
+	})
+	require.NoError(t, err)
+
+	msg := g.lastBody["message"].(map[string]any)
+	assert.NotContains(t, msg, "notification", "nothing for Android to show by itself")
+	assert.Equal(t, map[string]any{"type": "call", "transfer_id": "t-1"}, msg["data"])
+	android := msg["android"].(map[string]any)
+	assert.Equal(t, "HIGH", android["priority"])
+	assert.Equal(t, "30s", android["ttl"])
+	assert.NotContains(t, android, "notification")
+}
+
 func TestFCMValidateOnly(t *testing.T) {
 	g := newFakeGoogle(t)
 	require.NoError(t, g.client(t, nil).Validate(context.Background(), push.Message{Token: "t"}))

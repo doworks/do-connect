@@ -5,7 +5,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/callhours"
-	"github.com/shridarpatil/whatomate/internal/websocket"
 )
 
 // ringable is who the calling hours allow to be rung right now. When the
@@ -54,18 +53,12 @@ func (r ringable) filter(ids []uuid.UUID) []uuid.UUID {
 func (m *Manager) offerToRingable(orgID uuid.UUID, payload map[string]any) {
 	ring := m.ringableNow(orgID)
 	if ring.all {
-		m.broadcastEvent(orgID, websocket.TypeCallTransferWaiting, payload)
-		return
-	}
-	if m.wsHub == nil {
+		m.offerToEveryone(orgID, payload)
 		return
 	}
 	ids := make([]uuid.UUID, 0, len(ring.ids))
 	for id := range ring.ids {
 		ids = append(ids, id)
 	}
-	m.wsHub.BroadcastToUsers(orgID, ids, websocket.WSMessage{
-		Type:    websocket.TypeCallTransferWaiting,
-		Payload: payload,
-	})
+	m.offerToUsers(orgID, ids, payload)
 }

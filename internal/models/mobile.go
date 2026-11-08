@@ -23,6 +23,8 @@ type MobileDevice struct {
 	Platform   string `gorm:"size:20" json:"platform"`
 	AppVersion string `gorm:"size:40" json:"app_version"`
 	PushToken  string `gorm:"size:4096" json:"-"`
+	// Rings is whether incoming calls ring this phone (on unless turned off).
+	Rings bool `gorm:"default:true;not null" json:"rings"`
 
 	TokenHash          string     `gorm:"size:64;uniqueIndex;not null" json:"-"`
 	PreviousTokenHash  *string    `gorm:"size:64;index" json:"-"`

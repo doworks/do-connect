@@ -46,6 +46,8 @@ type App struct {
 	S3Client *storage.S3Client
 	// Push notifies the mobile app of new incoming messages (nil when not configured)
 	Push *push.FCM
+	// phoneRings remembers which phones rang for each call offer.
+	phoneRings phoneRings
 	// wg tracks background goroutines for graceful shutdown
 	wg sync.WaitGroup
 

@@ -138,10 +138,7 @@ func (m *Manager) initiateTransfer(session *CallSession, waAccount string, teamT
 			"whatsapp_account": transfer.WhatsAppAccount,
 			"transferred_at":   transfer.TransferredAt.Format(time.RFC3339),
 		}
-		m.wsHub.BroadcastToUser(session.OrganizationID, *assignedAgentID, websocket.WSMessage{
-			Type:    websocket.TypeCallTransferWaiting,
-			Payload: payload,
-		})
+		m.offerToUsers(session.OrganizationID, []uuid.UUID{*assignedAgentID}, payload)
 
 		// Wait for assigned agent to accept or timeout
 		go func() {
@@ -440,10 +437,7 @@ func (m *Manager) InitiateAgentTransfer(callLogID, initiatingAgentID uuid.UUID, 
 			"initiating_agent_id": initiatingAgentID.String(),
 			"transferred_at":      transfer.TransferredAt.Format(time.RFC3339),
 		}
-		m.wsHub.BroadcastToUser(session.OrganizationID, *targetAgentID, websocket.WSMessage{
-			Type:    websocket.TypeCallTransferWaiting,
-			Payload: payload,
-		})
+		m.offerToUsers(session.OrganizationID, []uuid.UUID{*targetAgentID}, payload)
 	} else if teamID != nil {
 		// Team transfer: use rotation (per-agent timeout with fallback)
 		session.mu.Lock()
@@ -967,10 +961,7 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 		maps.Copy(agentPayload, basePayload)
 		agentPayload["assigned_to_you"] = true
 		agentPayload["agent_id"] = agentID.String()
-		m.wsHub.BroadcastToUser(orgID, *agentID, websocket.WSMessage{
-			Type:    websocket.TypeCallTransferWaiting,
-			Payload: agentPayload,
-		})
+		m.offerToUsers(orgID, []uuid.UUID{*agentID}, agentPayload)
 
 		m.log.Info("Rotation: assigned call transfer to agent",
 			"transfer_id", transfer.ID,
@@ -994,6 +985,7 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 					"reason": "timeout",
 				},
 			})
+			m.stopUserPhones(orgID, transfer.ID, *agentID)
 			// Clear agent_id so next iteration sets the new one
 			m.db.Model(&models.CallTransfer{}).Where("id = ?", transfer.ID).
 				Update("agent_id", nil)
@@ -1014,6 +1006,7 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 					"reason": "total_timeout",
 				},
 			})
+			m.stopUserPhones(orgID, transfer.ID, *agentID)
 			// Clear agent_id before fallback
 			m.db.Model(&models.CallTransfer{}).Where("id = ?", transfer.ID).
 				Update("agent_id", nil)
@@ -1049,10 +1042,7 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 	fallbackPayload := make(map[string]any)
 	maps.Copy(fallbackPayload, basePayload)
 	fallbackPayload["broadcast_fallback"] = true
-	m.wsHub.BroadcastToUsers(orgID, remaining, websocket.WSMessage{
-		Type:    websocket.TypeCallTransferWaiting,
-		Payload: fallbackPayload,
-	})
+	m.offerToUsers(orgID, remaining, fallbackPayload)
 
 	m.log.Info("Rotation exhausted, broadcasting to remaining team",
 		"transfer_id", transfer.ID,

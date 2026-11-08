@@ -41,6 +41,14 @@ type Message struct {
 	Tag       string
 	ChannelID string
 	Data      map[string]string
+	// Silent sends only Data, for the app to handle itself (an incoming
+	// call shows its own full-screen ringing, not a notification). It wakes
+	// the app even when it is closed.
+	Silent bool
+	// TTL drops the message if the phone can't be reached in time; a ring
+	// that arrives after the call is over is worse than none. Zero is
+	// Firebase's default (four weeks).
+	TTL time.Duration
 }
 
 // Options override the Google endpoints, for tests.
@@ -194,16 +202,14 @@ func buildMessage(msg Message) map[string]any {
 	if msg.Tag != "" {
 		notification["tag"] = msg.Tag
 	}
-	m := map[string]any{
-		"token": msg.Token,
-		"notification": map[string]string{
-			"title": msg.Title,
-			"body":  msg.Body,
-		},
-		"android": map[string]any{
-			"priority":     "HIGH",
-			"notification": notification,
-		},
+	android := map[string]any{"priority": "HIGH"}
+	if msg.TTL > 0 {
+		android["ttl"] = fmt.Sprintf("%ds", int(msg.TTL.Seconds()))
+	}
+	m := map[string]any{"token": msg.Token, "android": android}
+	if !msg.Silent {
+		m["notification"] = map[string]string{"title": msg.Title, "body": msg.Body}
+		android["notification"] = notification
 	}
 	if len(msg.Data) > 0 {
 		m["data"] = msg.Data

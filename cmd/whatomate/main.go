@@ -249,6 +249,7 @@ func runServer(args []string) {
 			lo.Error("Push notifications are off: could not load the FCM credentials", "error", err)
 		} else {
 			app.Push = fcm
+			app.CallManager.SetPhoneRinger(app)
 			lo.Info("Push notifications on", "fcm_project", fcm.ProjectID())
 		}
 	}
@@ -630,6 +631,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/mobile/devices", app.ListMobileDevices)
 	g.DELETE("/api/mobile/devices/{id}", app.DeleteMobileDevice)
 	g.PUT("/api/mobile/push-token", app.UpdateMobilePushToken)
+	g.PUT("/api/mobile/ring", app.UpdateMobileRing)
 
 	// User Management (admin only - enforced by middleware)
 	g.GET("/api/users", app.ListUsers)

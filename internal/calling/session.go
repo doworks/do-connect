@@ -156,6 +156,7 @@ type Manager struct {
 	wsHub    *websocket.Hub
 	config   *config.CallingConfig
 	s3       *storage.S3Client // nil when recording is disabled
+	phones   PhoneRinger       // nil: calls ring only in browsers
 	redis    *redis.Client
 	assigner *assignment.Assigner
 }
@@ -501,6 +502,7 @@ func (m *Manager) cleanupSession(callID string) {
 
 // broadcastEvent broadcasts a call event via WebSocket to an organization.
 func (m *Manager) broadcastEvent(orgID uuid.UUID, eventType string, payload map[string]any) {
+	m.stopPhonesFor(orgID, eventType, payload)
 	if m.wsHub == nil {
 		return
 	}

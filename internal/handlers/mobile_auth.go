@@ -80,6 +80,7 @@ type MobileDeviceResponse struct {
 	Platform    string    `json:"platform"`
 	AppVersion  string    `json:"app_version"`
 	PushEnabled bool      `json:"push_enabled"`
+	Rings       bool      `json:"rings"`
 	Current     bool      `json:"current"`
 	CreatedAt   time.Time `json:"created_at"`
 	LastSeenAt  time.Time `json:"last_seen_at"`
@@ -458,6 +459,7 @@ func mobileDeviceToResponse(d *models.MobileDevice, current uuid.UUID) MobileDev
 		Platform:    d.Platform,
 		AppVersion:  d.AppVersion,
 		PushEnabled: d.PushToken != "",
+		Rings:       d.Rings,
 		Current:     d.ID == current,
 		CreatedAt:   d.CreatedAt,
 		LastSeenAt:  d.LastSeenAt,
