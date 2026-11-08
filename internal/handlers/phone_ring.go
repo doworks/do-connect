@@ -2,7 +2,13 @@ package handlers
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +31,9 @@ const (
 	phoneStopTTL = 2 * time.Minute
 	// How long the server remembers which phones it rang for a transfer.
 	phoneRingMemory = 10 * time.Minute
+	// How long a ring's decline pass works: the ringing screen can decline
+	// with it while the app is closed and not signed in.
+	declinePassTTL = 2 * time.Minute
 )
 
 type ringedPhone struct {
@@ -98,7 +107,15 @@ func (a *App) RingPhones(orgID uuid.UUID, userIDs []uuid.UUID, offer map[string]
 	ring.phones = append(ring.phones, phones...)
 	a.phoneRings.mu.Unlock()
 
-	a.sendToPhones(phones, data, phoneRingTTL)
+	expires := time.Now().Add(declinePassTTL).Unix()
+	a.sendToPhones(phones, func(phone ringedPhone) map[string]string {
+		own := make(map[string]string, len(data)+1)
+		for k, v := range data {
+			own[k] = v
+		}
+		own["decline_pass"] = a.declinePass(transferID, phone.UserID, expires)
+		return own
+	}, phoneRingTTL)
 	a.Log.Info("Rang phones for a call", "transfer_id", transferID, "phones", len(phones))
 }
 
@@ -128,7 +145,8 @@ func (a *App) StopRinging(orgID uuid.UUID, transferID string, userIDs []uuid.UUI
 	a.phoneRings.mu.Unlock()
 
 	if len(stop) > 0 {
-		a.sendToPhones(stop, map[string]string{"type": "call_end", "transfer_id": transferID}, phoneStopTTL)
+		end := map[string]string{"type": "call_end", "transfer_id": transferID}
+		a.sendToPhones(stop, func(ringedPhone) map[string]string { return end }, phoneStopTTL)
 	}
 }
 
@@ -193,7 +211,7 @@ func (a *App) ringData(orgID uuid.UUID, offer map[string]any) map[string]string 
 	return data
 }
 
-func (a *App) sendToPhones(phones []ringedPhone, data map[string]string, ttl time.Duration) {
+func (a *App) sendToPhones(phones []ringedPhone, dataFor func(ringedPhone) map[string]string, ttl time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
 	defer cancel()
 	var wg sync.WaitGroup
@@ -203,6 +221,7 @@ func (a *App) sendToPhones(phones []ringedPhone, data map[string]string, ttl tim
 			defer wg.Done()
 			sendCtx, cancelSend := context.WithTimeout(ctx, pushSendTimeout)
 			defer cancelSend()
+			data := dataFor(phone)
 			err := a.Push.Send(sendCtx, push.Message{Token: phone.PushToken, Silent: true, TTL: ttl, Data: data})
 			switch {
 			case err == nil:
@@ -237,4 +256,109 @@ func (a *App) UpdateMobileRing(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to update ringing", nil, "")
 	}
 	return r.SendEnvelope(map[string]bool{"rings": req.Rings})
+}
+
+// CallTakers lists the active staff who may take calls (calling.CallTakerLister),
+// so a call offered to everyone knows when everyone has declined it.
+func (a *App) CallTakers(orgID uuid.UUID) []uuid.UUID {
+	var ids []uuid.UUID
+	if err := a.DB.Model(&models.User{}).
+		Where("organization_id = ? AND is_active = ?", orgID, true).
+		Pluck("id", &ids).Error; err != nil {
+		a.Log.Error("Failed to list who may take calls", "error", err)
+		return nil
+	}
+	out := ids[:0]
+	for _, id := range ids {
+		if a.HasPermission(id, models.ResourceCallTransfers, models.ActionWrite, orgID) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// DeclineCallTransfer is a staff member declining a waiting call: it stops
+// ringing for them, and ends for the caller once everyone it was offered to
+// has declined.
+func (a *App) DeclineCallTransfer(r *fastglue.Request) error {
+	orgID, userID, err := a.requireAuth(r, models.ResourceCallTransfers, models.ActionWrite)
+	if err != nil {
+		return nil
+	}
+	transferID, err := parsePathUUID(r, "id", "call transfer")
+	if err != nil {
+		return nil
+	}
+	var transfer models.CallTransfer
+	if err := a.DB.Where("id = ? AND organization_id = ?", transferID, orgID).First(&transfer).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Call transfer not found", nil, "")
+	}
+	if a.CallManager != nil {
+		a.CallManager.DeclineTransfer(transferID, userID)
+	}
+	return r.SendEnvelope(map[string]string{"status": "declined"})
+}
+
+// declinePass lets one user decline one call until it expires, without a
+// sign-in: "user.expires.signature".
+func (a *App) declinePass(transferID string, userID uuid.UUID, expires int64) string {
+	return fmt.Sprintf("%s.%d.%s", userID, expires, a.declineSignature(transferID, userID, expires))
+}
+
+func (a *App) declineSignature(transferID string, userID uuid.UUID, expires int64) string {
+	mac := hmac.New(sha256.New, []byte("call-decline:"+a.Config.JWT.Secret))
+	_, _ = fmt.Fprintf(mac, "%s.%s.%d", transferID, userID, expires)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// checkDeclinePass returns the user a pass is for, if it is genuine and current.
+func (a *App) checkDeclinePass(transferID, pass string) (uuid.UUID, bool) {
+	parts := strings.Split(pass, ".")
+	if len(parts) != 3 {
+		return uuid.Nil, false
+	}
+	userID, err := uuid.Parse(parts[0])
+	if err != nil {
+		return uuid.Nil, false
+	}
+	expires, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || time.Now().Unix() > expires {
+		return uuid.Nil, false
+	}
+	want := a.declineSignature(transferID, userID, expires)
+	if !hmac.Equal([]byte(want), []byte(parts[2])) {
+		return uuid.Nil, false
+	}
+	return userID, true
+}
+
+// MobileCallDeclineRequest is the ringing screen declining with its pass.
+type MobileCallDeclineRequest struct {
+	TransferID string `json:"transfer_id"`
+	Pass       string `json:"pass"`
+}
+
+// MobileCallDecline declines a call from the ringing screen while the app is
+// closed, with the pass that came with the ring instead of a sign-in.
+func (a *App) MobileCallDecline(r *fastglue.Request) error {
+	var req MobileCallDeclineRequest
+	if err := a.decodeRequest(r, &req); err != nil {
+		return nil
+	}
+	transferID, err := uuid.Parse(req.TransferID)
+	if err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid call", nil, "")
+	}
+	userID, ok := a.checkDeclinePass(transferID.String(), req.Pass)
+	if !ok {
+		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "This decline has expired", nil, "")
+	}
+	var transfer models.CallTransfer
+	if err := a.DB.Where("id = ?", transferID).First(&transfer).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Call transfer not found", nil, "")
+	}
+	if a.CallManager != nil {
+		a.CallManager.DeclineTransfer(transferID, userID)
+	}
+	return r.SendEnvelope(map[string]string{"status": "declined"})
 }

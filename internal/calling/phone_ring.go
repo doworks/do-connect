@@ -28,6 +28,7 @@ func (m *Manager) offerToUsers(orgID uuid.UUID, ids []uuid.UUID, payload map[str
 	if len(ids) == 0 {
 		return
 	}
+	m.noteOffered(payload, ids, false)
 	if m.wsHub != nil {
 		m.wsHub.BroadcastToUsers(orgID, ids, websocket.WSMessage{
 			Type:    websocket.TypeCallTransferWaiting,
@@ -39,6 +40,7 @@ func (m *Manager) offerToUsers(orgID uuid.UUID, ids []uuid.UUID, payload map[str
 
 // offerToEveryone offers a waiting call to all staff who may take it.
 func (m *Manager) offerToEveryone(orgID uuid.UUID, payload map[string]any) {
+	m.noteOffered(payload, nil, true)
 	m.broadcastEvent(orgID, websocket.TypeCallTransferWaiting, payload)
 	m.ringPhones(orgID, nil, payload)
 }

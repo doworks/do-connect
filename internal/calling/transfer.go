@@ -877,6 +877,9 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 	teamID := *transfer.TeamID
 	orgID := transfer.OrganizationID
 	triedAgents := []uuid.UUID{}
+	session.mu.Lock()
+	session.rotating = true
+	session.mu.Unlock()
 	// Only staff the calling hours allow right now are rung.
 	ring := m.ringableNow(orgID)
 

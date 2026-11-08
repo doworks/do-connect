@@ -91,6 +91,13 @@ type CallSession struct {
 	PreAcceptErr error
 	acceptMu     sync.Mutex
 
+	// Who the waiting call was offered to and who declined it: once all of
+	// them have, it ends. Not used in a team rotation, which moves on by turn.
+	offered        map[uuid.UUID]bool
+	offeredUnknown bool
+	declined       map[uuid.UUID]bool
+	rotating       bool
+
 	// Outgoing call fields
 	Direction      models.CallDirection
 	AgentID        uuid.UUID

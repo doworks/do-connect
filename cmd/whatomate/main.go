@@ -523,6 +523,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	}
 	g.POST("/api/auth/logout", app.Logout)
 	g.POST("/api/mobile/logout", app.MobileLogout)
+	// The ringing screen declining while the app is closed: a signed pass, no sign-in.
+	g.POST("/api/mobile/call-decline", app.MobileCallDecline)
 	g.POST("/api/auth/switch-org", app.SwitchOrg)
 	g.GET("/api/auth/ws-token", app.GetWSToken)
 
@@ -560,7 +562,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 		if path == "/health" || path == "/ready" ||
 			path == "/api/auth/login" || path == "/api/auth/register" || path == "/api/auth/refresh" ||
 			path == "/api/auth/logout" || path == "/api/webhook" || path == "/ws" ||
-			path == "/api/mobile/login" || path == "/api/mobile/refresh" || path == "/api/mobile/logout" {
+			path == "/api/mobile/login" || path == "/api/mobile/refresh" || path == "/api/mobile/logout" ||
+			path == "/api/mobile/call-decline" {
 			return r
 		}
 		// Skip auth for SSO routes (they handle their own auth via state tokens)
@@ -903,6 +906,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/call-transfers/{id}", app.GetCallTransfer)
 	g.POST("/api/call-transfers/{id}/connect", app.ConnectCallTransfer)
 	g.POST("/api/call-transfers/{id}/hangup", app.HangupCallTransfer)
+	g.POST("/api/call-transfers/{id}/decline", app.DeclineCallTransfer)
 	g.POST("/api/call-transfers/initiate", app.InitiateAgentTransfer)
 
 	// Call Hold

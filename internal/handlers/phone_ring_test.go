@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/middleware"
@@ -135,5 +137,98 @@ func TestPhonesRingForCalls(t *testing.T) {
 		testutil.SetAuthContext(req, f.org.ID, f.user.ID)
 		require.NoError(t, f.app.UpdateMobileRing(req))
 		assert.Equal(t, fasthttp.StatusBadRequest, testutil.GetResponseStatusCode(req))
+	})
+}
+
+func TestCallTakersAndDecline(t *testing.T) {
+	t.Run("only active staff allowed to take calls count as everyone", func(t *testing.T) {
+		f := newPushFixture(t)
+		taker := f.userWithRole(t, callTaker)
+		chatOnly := f.userWithRole(t, chatAgent)
+		ids := f.app.CallTakers(f.org.ID)
+		assert.Contains(t, ids, taker.ID)
+		assert.NotContains(t, ids, chatOnly.ID)
+	})
+
+	t.Run("declining a call that doesn't exist says so", func(t *testing.T) {
+		f := newPushFixture(t)
+		taker := f.userWithRole(t, callTaker)
+		req := testutil.NewJSONRequest(t, map[string]any{})
+		testutil.SetAuthContext(req, f.org.ID, taker.ID)
+		testutil.SetPathParam(req, "id", uuid.NewString())
+		require.NoError(t, f.app.DeclineCallTransfer(req))
+		assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req))
+	})
+
+	t.Run("staff who can't take calls can't decline them", func(t *testing.T) {
+		f := newPushFixture(t)
+		chatOnly := f.userWithRole(t, chatAgent)
+		req := testutil.NewJSONRequest(t, map[string]any{})
+		testutil.SetAuthContext(req, f.org.ID, chatOnly.ID)
+		testutil.SetPathParam(req, "id", uuid.NewString())
+		require.NoError(t, f.app.DeclineCallTransfer(req))
+		assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req))
+	})
+}
+
+func TestDeclinePass(t *testing.T) {
+	decline := func(t *testing.T, f pushFixture, transferID, pass string) int {
+		t.Helper()
+		req := testutil.NewJSONRequest(t, map[string]any{"transfer_id": transferID, "pass": pass})
+		require.NoError(t, f.app.MobileCallDecline(req))
+		return testutil.GetResponseStatusCode(req)
+	}
+
+	t.Run("each ring carries a pass for its own user, which declines without a sign-in", func(t *testing.T) {
+		f := newPushFixture(t)
+		taker := f.userWithRole(t, callTaker)
+		f.phone(t, taker, "taker-phone")
+		contact := f.contact(t)
+		offer := f.offer(contact)
+		callLog := models.CallLog{
+			BaseModel:       models.BaseModel{ID: uuid.New()},
+			OrganizationID:  f.org.ID,
+			WhatsAppAccount: f.account.Name,
+			ContactID:       contact.ID,
+			WhatsAppCallID:  "wacid." + uuid.NewString(),
+			CallerPhone:     contact.PhoneNumber,
+			Status:          models.CallStatusRinging,
+		}
+		require.NoError(t, f.app.DB.Create(&callLog).Error)
+		transfer := models.CallTransfer{
+			BaseModel:      models.BaseModel{ID: uuid.MustParse(offer["id"].(string))},
+			OrganizationID: f.org.ID,
+			CallLogID:      callLog.ID,
+			ContactID:      contact.ID,
+			CallerPhone:    contact.PhoneNumber,
+			Status:         models.CallTransferStatusWaiting,
+		}
+		require.NoError(t, f.app.DB.Create(&transfer).Error)
+
+		f.app.RingPhones(f.org.ID, []uuid.UUID{taker.ID}, offer)
+		f.fcm.mu.Lock()
+		data := f.fcm.messages[0]["data"].(map[string]any)
+		f.fcm.mu.Unlock()
+		pass, _ := data["decline_pass"].(string)
+		require.NotEmpty(t, pass)
+		assert.Contains(t, pass, taker.ID.String())
+
+		assert.Equal(t, fasthttp.StatusOK, decline(t, f, offer["id"].(string), pass))
+	})
+
+	t.Run("a pass for another call, tampered with, or expired is refused", func(t *testing.T) {
+		f := newPushFixture(t)
+		taker := f.userWithRole(t, callTaker)
+		transferID := uuid.NewString()
+		good := f.app.declinePass(transferID, taker.ID, time.Now().Add(time.Minute).Unix())
+
+		assert.Equal(t, fasthttp.StatusUnauthorized, decline(t, f, uuid.NewString(), good), "another call")
+		assert.Equal(t, fasthttp.StatusUnauthorized, decline(t, f, transferID, good[:len(good)-2]+"00"), "tampered")
+		other := f.userWithRole(t, callTaker)
+		forged := other.ID.String() + good[strings.Index(good, "."):]
+		assert.Equal(t, fasthttp.StatusUnauthorized, decline(t, f, transferID, forged), "someone else's name on it")
+		expired := f.app.declinePass(transferID, taker.ID, time.Now().Add(-time.Second).Unix())
+		assert.Equal(t, fasthttp.StatusUnauthorized, decline(t, f, transferID, expired))
+		assert.Equal(t, fasthttp.StatusUnauthorized, decline(t, f, transferID, "nonsense"))
 	})
 }
