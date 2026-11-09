@@ -2741,7 +2741,10 @@
     "possibleDuplicate": "This CPR is already registered",
     "addNumberToThem": "Add this number instead",
     "createPatient": "Create patient",
-    "searchPatient": "Name, file number or CPR"
+    "searchPatient": "Name, file number or CPR",
+    "slotBooked": "{count} already booked (the doctor takes {limit} at once)",
+    "slotBookedHint": "Visits already booked at that time",
+    "slotBookedHintMany": "Visits already booked at that time. This doctor takes {count} at once."
   },
   "callHours": {
     "title": "Calling hours",

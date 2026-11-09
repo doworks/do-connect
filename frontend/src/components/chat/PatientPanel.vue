@@ -39,7 +39,8 @@ const isScheduling = computed(() => props.view === 'book' || props.view === 'res
 const viewTitle = computed(() => t(`clinic.view_${props.view}`))
 
 // Booking
-interface Slot { time: string; state: 'free' | 'busy' | 'full' }
+// booked: the doctor's visits already at that time; at_once: how many they take together.
+interface Slot { time: string; state: 'free' | 'busy' | 'full'; booked?: number; at_once?: number }
 const practitioners = ref<{ name: string; label: string; color: string }[]>([])
 const appointmentTypes = ref<{ name: string; duration: number }[]>([])
 const practitioner = ref('')
@@ -48,6 +49,16 @@ const day = ref('')
 const slots = ref<Slot[]>([])
 const slot = ref('')
 const notifies = ref<string[]>([])
+const hasBookedSlots = computed(() => slots.value.some(option => option.booked))
+const atOnce = computed(() => slots.value.find(option => option.at_once)?.at_once || 1)
+
+function slotTitle(option: Slot) {
+  const parts: string[] = []
+  if (option.state === 'full') parts.push(t('clinic.slotFull'))
+  else if (option.state === 'busy') parts.push(t('clinic.slotBusy'))
+  if (option.booked) parts.push(t('clinic.slotBooked', { count: option.booked, limit: option.at_once || 1 }))
+  return parts.join(' · ')
+}
 
 const days = computed(() => {
   const today = new Date()
@@ -447,16 +458,29 @@ const frappeUrl = computed(() => patient.value && clinic.context?.frappe_url
               :key="option.time"
               type="button"
               :disabled="option.state !== 'free'"
-              :title="option.state === 'full' ? t('clinic.slotFull') : option.state === 'busy' ? t('clinic.slotBusy') : ''"
+              :title="slotTitle(option)"
+              :data-booked="option.booked || 0"
               :class="[
-                'h-7 rounded-md text-[11px] font-medium tabular-nums',
+                'relative h-7 rounded-md text-[11px] font-medium tabular-nums',
                 slot === option.time ? 'bg-emerald-600 text-white'
                   : option.state === 'free' ? 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 light:bg-emerald-50 light:text-emerald-800 light:hover:bg-emerald-100'
                   : 'bg-white/[0.03] text-white/25 line-through light:bg-gray-50 light:text-gray-300'
               ]"
               @click="slot = option.time"
-            >{{ formatClock(option.time).replace(' AM', 'a').replace(' PM', 'p') }}</button>
+            >
+              {{ formatClock(option.time).replace(' AM', 'a').replace(' PM', 'p') }}
+              <span
+                v-if="option.booked"
+                data-test="slot-booked"
+                :class="['absolute -top-1.5 -right-1 min-w-[15px] h-[15px] px-1 rounded-full text-[9px] font-semibold leading-[15px] no-underline shadow',
+                         option.state === 'free' ? 'bg-sky-500 text-white' : 'bg-white/20 text-white/70 light:bg-gray-300 light:text-gray-700']"
+              >{{ option.booked }}</span>
+            </button>
           </div>
+          <p v-if="hasBookedSlots" class="flex items-center gap-1.5 text-[11px] text-muted-foreground" data-test="slot-booked-hint">
+            <span class="inline-block min-w-[15px] h-[15px] px-1 rounded-full bg-sky-500 text-white text-[9px] font-semibold leading-[15px] text-center">1</span>
+            {{ atOnce > 1 ? t('clinic.slotBookedHintMany', { count: atOnce }) : t('clinic.slotBookedHint') }}
+          </p>
           <p v-for="note in notifies" :key="note" class="flex gap-1.5 rounded-md px-2 py-1.5 bg-amber-500/10 text-amber-300 light:bg-amber-50 light:text-amber-800">
             <AlertTriangle class="h-3.5 w-3.5 shrink-0" />{{ note }}
           </p>
