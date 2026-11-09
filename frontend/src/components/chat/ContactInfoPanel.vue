@@ -29,7 +29,7 @@ import { getInitials, getAvatarGradient, formatLabel } from '@/lib/utils'
 import { getTagColorClass } from '@/lib/constants'
 import { useTagsStore } from '@/stores/tags'
 import { useAuthStore } from '@/stores/auth'
-import { contactsService, type Tag } from '@/services/api'
+import { contactsService, apiAssetUrl, type Tag } from '@/services/api'
 import { toast } from 'vue-sonner'
 import type { Contact } from '@/stores/contacts'
 
@@ -265,7 +265,7 @@ async function updateContactTags(tags: string[]) {
         <!-- Contact Header -->
         <div class="flex flex-col items-center text-center pb-4 border-b">
           <Avatar class="h-16 w-16 mb-3">
-            <AvatarImage :src="contact.avatar_url" />
+            <AvatarImage :src="apiAssetUrl(contact.avatar_url)" />
             <AvatarFallback :class="'text-lg bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)">
               {{ getInitials(contact.name || contact.phone_number) }}
             </AvatarFallback>

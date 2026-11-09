@@ -4,6 +4,13 @@ import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestCo
 const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
 const API_BASE_URL = import.meta.env.VITE_API_URL || `${basePath}/api`
 
+// apiAssetUrl turns a server path such as "/api/contacts/<id>/photo" into an
+// address the browser can load, wherever the API is served from.
+export function apiAssetUrl(path?: string | null): string | undefined {
+  if (!path) return undefined
+  return path.startsWith('/api/') ? API_BASE_URL + path.slice(4) : path
+}
+
 export const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,

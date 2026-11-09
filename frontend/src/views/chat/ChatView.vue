@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUsersStore } from '@/stores/users'
 import { useTransfersStore } from '@/stores/transfers'
 import { wsService } from '@/services/websocket'
-import { contactsService, chatbotService, messagesService, customActionsService, accountsService, cannedResponsesService, getRequestHeaders, type CustomAction, type ActionResult, type CannedResponse } from '@/services/api'
+import { contactsService, chatbotService, messagesService, customActionsService, accountsService, cannedResponsesService, getRequestHeaders, apiAssetUrl, type CustomAction, type ActionResult, type CannedResponse } from '@/services/api'
 import { useTagsStore } from '@/stores/tags'
 import { TagBadge } from '@/components/ui/tag-badge'
 import { getTagColorClass } from '@/lib/constants'
@@ -1871,7 +1871,7 @@ async function sendMediaMessage() {
             @click="handleContactClick(contact)"
           >
             <Avatar class="h-9 w-9 ring-2 ring-white/[0.1] light:ring-gray-200">
-              <AvatarImage :src="contact.avatar_url" />
+              <AvatarImage :src="apiAssetUrl(contact.avatar_url)" />
               <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)">
                 {{ getInitials(contactTitle(contact)) }}
               </AvatarFallback>
@@ -1914,7 +1914,7 @@ async function sendMediaMessage() {
           <!-- One line however narrow: the name first, tags clipped after it. -->
           <div class="flex items-center gap-2 min-w-0 flex-1">
             <Avatar class="h-8 w-8 shrink-0 ring-2 ring-white/[0.1] light:ring-gray-200">
-              <AvatarImage :src="contactsStore.currentContact.avatar_url" />
+              <AvatarImage :src="apiAssetUrl(contactsStore.currentContact.avatar_url)" />
               <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contactsStore.currentContact.name || contactsStore.currentContact.phone_number)">
                 {{ getInitials(contactTitle(contactsStore.currentContact)) }}
               </AvatarFallback>

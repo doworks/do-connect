@@ -9,7 +9,9 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { clinicService } from '@/services/api'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { clinicService, apiAssetUrl } from '@/services/api'
+import { getInitials, getAvatarGradient } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
 import { formatPhone } from '@/lib/phone'
 import { useClinicStore } from '@/stores/clinic'
@@ -27,6 +29,11 @@ const { t } = useI18n()
 const clinic = useClinicStore()
 const patient = computed(() => clinic.selected)
 const busy = ref('')
+// The photo of the patient shown, not just the first on the number.
+const patientPhoto = computed(() => {
+  if (!props.contact.avatar_url || !patient.value) return undefined
+  return apiAssetUrl(`${props.contact.avatar_url}?patient=${encodeURIComponent(patient.value.name)}`)
+})
 
 const isScheduling = computed(() => props.view === 'book' || props.view === 'reschedule')
 const viewTitle = computed(() => t(`clinic.view_${props.view}`))
@@ -208,7 +215,7 @@ const frappeUrl = computed(() => patient.value && clinic.context?.frappe_url
 </script>
 
 <template>
-  <div class="flex flex-col bg-card h-full w-[320px] shrink-0 border-l border-white/[0.08] light:border-gray-200">
+  <div class="relative z-10 flex flex-col bg-card h-full w-[320px] shrink-0 border-l border-white/[0.08] light:border-gray-200">
     <div class="h-14 px-3 border-b border-white/[0.08] light:border-gray-200 flex items-center gap-1">
       <Button v-if="view !== 'overview'" variant="ghost" size="icon" class="h-7 w-7" :aria-label="t('common.back')" @click="emit('update:view', 'overview')">
         <ArrowLeft class="h-4 w-4" />
@@ -242,7 +249,14 @@ const frappeUrl = computed(() => patient.value && clinic.context?.frappe_url
             >{{ member.patient_name.split(' ')[0] }} <span class="opacity-70">{{ member.age }}</span></button>
           </div>
 
-          <div>
+          <div class="flex items-start gap-3">
+            <Avatar v-if="contact.avatar_url" class="h-12 w-12 shrink-0 ring-2 ring-white/[0.1] light:ring-gray-200">
+              <AvatarImage :src="patientPhoto" :alt="patient.patient_name" />
+              <AvatarFallback :class="'text-sm bg-gradient-to-br text-white ' + getAvatarGradient(patient.patient_name)">
+                {{ getInitials(patient.patient_name) }}
+              </AvatarFallback>
+            </Avatar>
+            <div class="min-w-0">
             <p class="text-sm font-semibold" dir="auto">{{ patient.patient_name }}</p>
             <p class="text-muted-foreground flex flex-wrap gap-x-2 mt-0.5">
               <span>{{ [patient.age, patient.sex].filter(Boolean).join(' · ') }}</span>
@@ -253,6 +267,7 @@ const frappeUrl = computed(() => patient.value && clinic.context?.frappe_url
               <Languages class="h-3 w-3" />{{ t('clinic.replyIn') }}
               <span class="font-medium text-foreground">{{ patient.language === 'AR' ? t('clinic.arabic') : t('clinic.english') }}</span>
             </p>
+            </div>
           </div>
 
           <div v-for="flag in patient.flags" :key="flag.label" class="flex items-center gap-1.5 rounded-md px-2 py-1.5 font-medium bg-red-500/15 text-red-300 light:bg-red-50 light:text-red-700">

@@ -525,6 +525,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/mobile/logout", app.MobileLogout)
 	// The ringing screen declining while the app is closed: a signed pass, no sign-in.
 	g.POST("/api/mobile/call-decline", app.MobileCallDecline)
+	g.GET("/api/mobile/call-photo", app.MobileCallPhoto)
 	g.POST("/api/auth/switch-org", app.SwitchOrg)
 	g.GET("/api/auth/ws-token", app.GetWSToken)
 
@@ -563,7 +564,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 			path == "/api/auth/login" || path == "/api/auth/register" || path == "/api/auth/refresh" ||
 			path == "/api/auth/logout" || path == "/api/webhook" || path == "/ws" ||
 			path == "/api/mobile/login" || path == "/api/mobile/refresh" || path == "/api/mobile/logout" ||
-			path == "/api/mobile/call-decline" {
+			path == "/api/mobile/call-decline" || path == "/api/mobile/call-photo" {
 			return r
 		}
 		// Skip auth for SSO routes (they handle their own auth via state tokens)
@@ -671,6 +672,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/messages/{message_id}/forward", app.ForwardMessage)
 	g.POST("/api/messages/{message_id}/save-to-clinic", app.SaveMessageToClinic)
 	g.GET("/api/clinic/{action}", app.ClinicProxy)
+	g.GET("/api/contacts/{id}/photo", app.ContactPhoto)
 	g.POST("/api/clinic/{action}", app.ClinicProxy)
 	g.GET("/api/accounts/refused-events/summary", app.RefusedWebhookSummary)
 	g.GET("/api/accounts/{id}/refused-events", app.ListRefusedWebhooks)

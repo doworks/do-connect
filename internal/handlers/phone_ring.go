@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -114,6 +115,10 @@ func (a *App) RingPhones(orgID uuid.UUID, userIDs []uuid.UUID, offer map[string]
 			own[k] = v
 		}
 		own["decline_pass"] = a.declinePass(transferID, phone.UserID, expires)
+		if a.Config != nil && a.Config.Clinic.Enabled() {
+			// The ringing screen shows the caller's photo with the same pass.
+			own["photo_path"] = "/api/mobile/call-photo?transfer_id=" + url.QueryEscape(transferID) + "&pass=" + url.QueryEscape(own["decline_pass"])
+		}
 		return own
 	}, phoneRingTTL)
 	a.Log.Info("Rang phones for a call", "transfer_id", transferID, "phones", len(phones))
