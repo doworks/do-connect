@@ -214,6 +214,12 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 	}
 	var sound messageSoundUpdate
 
+	// The settings page is for people who may change them; the screen hides
+	// its controls from everyone else, and so does the server.
+	if err := a.requirePermission(r, userID, models.ResourceSettingsGeneral, models.ActionWrite); err != nil {
+		return nil
+	}
+
 	body := r.RequestCtx.PostBody()
 	if err := json.Unmarshal(body, &req); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")

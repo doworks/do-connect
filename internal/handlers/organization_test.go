@@ -103,7 +103,7 @@ func TestApp_UpdateOrganizationSettings_Success(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("update-settings")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("update-settings")), testutil.WithRoleID(&testutil.CreateAdminRole(t, app.DB, org.ID).ID))
 
 	maskEnabled := true
 	timezone := "America/New_York"
@@ -146,7 +146,7 @@ func TestApp_UpdateOrganizationSettings_PartialUpdate(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("partial-update")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("partial-update")), testutil.WithRoleID(&testutil.CreateAdminRole(t, app.DB, org.ID).ID))
 
 	// Set initial settings
 	org.Settings = models.JSONB{
@@ -197,7 +197,7 @@ func TestApp_UpdateOrganizationSettings_EmptyNameIgnored(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("empty-name")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("empty-name")), testutil.WithRoleID(&testutil.CreateAdminRole(t, app.DB, org.ID).ID))
 	originalName := org.Name
 
 	// Send an empty name -- should be ignored
@@ -221,7 +221,7 @@ func TestApp_UpdateOrganizationSettings_InvalidJSON(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("invalid-json")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("invalid-json")), testutil.WithRoleID(&testutil.CreateAdminRole(t, app.DB, org.ID).ID))
 
 	// Create a request with invalid JSON body
 	req := testutil.NewGETRequest(t)
@@ -369,7 +369,7 @@ func TestApp_UpdateOrganizationSettings_CallingFields(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("update-calling")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("update-calling")), testutil.WithRoleID(&testutil.CreateAdminRole(t, app.DB, org.ID).ID))
 
 	// Enable calling with custom values
 	req := testutil.NewJSONRequest(t, map[string]any{
@@ -398,7 +398,7 @@ func TestApp_UpdateOrganizationSettings_CallingPartialUpdate(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("calling-partial")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("calling-partial")), testutil.WithRoleID(&testutil.CreateAdminRole(t, app.DB, org.ID).ID))
 
 	// Set initial calling settings
 	org.Settings = models.JSONB{
@@ -432,7 +432,7 @@ func TestApp_UpdateOrganizationSettings_CallingDisable(t *testing.T) {
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("calling-disable")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("calling-disable")), testutil.WithRoleID(&testutil.CreateAdminRole(t, app.DB, org.ID).ID))
 
 	// Start with calling enabled
 	org.Settings = models.JSONB{
@@ -460,7 +460,7 @@ func TestApp_UpdateOrganizationSettings_CallingZeroDurationIgnored(t *testing.T)
 
 	app := newTestApp(t)
 	org := testutil.CreateTestOrganization(t, app.DB)
-	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("calling-zero")))
+	user := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithEmail(testutil.UniqueEmail("calling-zero")), testutil.WithRoleID(&testutil.CreateAdminRole(t, app.DB, org.ID).ID))
 
 	// Set initial calling settings
 	org.Settings = models.JSONB{

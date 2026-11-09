@@ -106,4 +106,21 @@ func TestMessageSoundSettings(t *testing.T) {
 		require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req))
 		assert.Equal(t, "drop", mine(t)["message_sound"])
 	})
+
+	t.Run("only people who may edit the settings can change the clinic's", func(t *testing.T) {
+		role := testutil.CreateTestRoleWithKeys(t, app.DB, org.ID, "reader-"+org.ID.String()[:6], []string{"settings.general:read", "chat:read"})
+		reader := testutil.CreateTestUser(t, app.DB, org.ID, testutil.WithRoleID(&role.ID))
+		for _, body := range []map[string]any{{"message_sound": "pop"}, {"calling_enabled": true}, {"mask_phone_numbers": false}} {
+			req := testutil.NewJSONRequest(t, body)
+			testutil.SetAuthContext(req, org.ID, reader.ID)
+			require.NoError(t, app.UpdateOrganizationSettings(req))
+			assert.Equal(t, fasthttp.StatusForbidden, testutil.GetResponseStatusCode(req), body)
+		}
+		assert.NotEqual(t, "pop", readClinic(t).Sound)
+
+		req := testutil.NewJSONRequest(t, map[string]any{"message_sound": "off"})
+		testutil.SetAuthContext(req, org.ID, reader.ID)
+		require.NoError(t, app.UpdateMyMessageSound(req))
+		assert.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(req), "their own sound is still theirs")
+	})
 }
