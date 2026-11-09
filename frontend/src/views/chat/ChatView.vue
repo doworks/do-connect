@@ -16,7 +16,7 @@ import { compressImage } from '@/lib/imageCompression'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import PatientAvatar from '@/components/shared/PatientAvatar.vue'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Spinner } from '@/components/ui/spinner'
@@ -1870,12 +1870,13 @@ async function sendMediaMessage() {
             ]"
             @click="handleContactClick(contact)"
           >
-            <Avatar class="h-9 w-9 ring-2 ring-white/[0.1] light:ring-gray-200">
-              <AvatarImage :src="apiAssetUrl(contact.avatar_url)" />
-              <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)">
-                {{ getInitials(contactTitle(contact)) }}
-              </AvatarFallback>
-            </Avatar>
+            <PatientAvatar
+              class="h-9 w-9 ring-2 ring-white/[0.1] light:ring-gray-200"
+              :src="apiAssetUrl(contact.avatar_url)"
+              :name="contactTitle(contact)"
+              :initials="getInitials(contactTitle(contact))"
+              :fallback-class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)"
+            />
             <ContactRowBody :contact="contact" :time="formatContactTime(contact.last_message_at)" />
           </div>
 
@@ -1913,12 +1914,13 @@ async function sendMediaMessage() {
         <div class="h-14 flex-shrink-0 px-4 border-b border-white/[0.08] light:border-gray-200 flex items-center justify-between gap-2 bg-[#0f0f10] light:bg-white">
           <!-- One line however narrow: the name first, tags clipped after it. -->
           <div class="flex items-center gap-2 min-w-0 flex-1">
-            <Avatar class="h-8 w-8 shrink-0 ring-2 ring-white/[0.1] light:ring-gray-200">
-              <AvatarImage :src="apiAssetUrl(contactsStore.currentContact.avatar_url)" />
-              <AvatarFallback :class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contactsStore.currentContact.name || contactsStore.currentContact.phone_number)">
-                {{ getInitials(contactTitle(contactsStore.currentContact)) }}
-              </AvatarFallback>
-            </Avatar>
+            <PatientAvatar
+              class="h-8 w-8 shrink-0 ring-2 ring-white/[0.1] light:ring-gray-200"
+              :src="apiAssetUrl(contactsStore.currentContact.avatar_url)"
+              :name="contactTitle(contactsStore.currentContact)"
+              :initials="getInitials(contactTitle(contactsStore.currentContact))"
+              :fallback-class="'text-xs bg-gradient-to-br text-white ' + getAvatarGradient(contactsStore.currentContact.name || contactsStore.currentContact.phone_number)"
+            />
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1.5 min-w-0 overflow-hidden">
                 <p class="text-sm font-medium text-white light:text-gray-900 truncate shrink-0 max-w-full" dir="auto" :title="contactTitle(contactsStore.currentContact)">

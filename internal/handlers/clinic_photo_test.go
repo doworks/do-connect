@@ -215,3 +215,21 @@ func TestMobileCallPhoto(t *testing.T) {
 		assert.Equal(t, data["decline_pass"], query.Get("pass"))
 	})
 }
+
+func TestLargeContactPhoto(t *testing.T) {
+	f := newHeldFixture(t)
+	fc, srv := newFakeClinic(t)
+	f.clinic(srv.URL)
+	fc.reply = func(req clinicRequest) (int, string) { return 200, photoReply("ab12" + uuid.NewString()[:8]) }
+	contact := f.contact(t)
+	small := f.photo(t, f.user, contact.ID, "")
+	large := f.photo(t, f.user, contact.ID, "", func(r *fastglue.Request) { testutil.SetQueryParam(r, "size", "large") })
+	require.Equal(t, fasthttp.StatusOK, testutil.GetResponseStatusCode(large))
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	require.Len(t, fc.requests, 2, "each size is asked for and kept apart")
+	_, smallAsked := fc.requests[0].Args["size"]
+	assert.False(t, smallAsked, "the avatar asks as before")
+	assert.Equal(t, "large", fc.requests[1].Args["size"])
+	assert.NotEqual(t, string(small.RequestCtx.Response.Header.Peek("ETag")), string(large.RequestCtx.Response.Header.Peek("ETag")))
+}

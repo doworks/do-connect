@@ -2951,5 +2951,10 @@
     "saveFailed": "Couldn't save the link",
     "notLinkedBadge": "Not linked to clinic",
     "notLinkedCount": "{count} user isn't linked to a clinic system login | {count} users aren't linked to a clinic system login"
+  },
+  "patientPhoto": {
+    "view": "View photo",
+    "title": "Photo of {name}",
+    "failed": "This photo couldn't be loaded."
   }
 }

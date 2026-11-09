@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted } from 'vue'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import PatientAvatar from '@/components/shared/PatientAvatar.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -264,12 +264,13 @@ async function updateContactTags(tags: string[]) {
       <div class="p-4 space-y-4">
         <!-- Contact Header -->
         <div class="flex flex-col items-center text-center pb-4 border-b">
-          <Avatar class="h-16 w-16 mb-3">
-            <AvatarImage :src="apiAssetUrl(contact.avatar_url)" />
-            <AvatarFallback :class="'text-lg bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)">
-              {{ getInitials(contact.name || contact.phone_number) }}
-            </AvatarFallback>
-          </Avatar>
+          <PatientAvatar
+            class="h-16 w-16 mb-3"
+            :src="apiAssetUrl(contact.avatar_url)"
+            :name="contact.name || contact.phone_number"
+            :initials="getInitials(contact.name || contact.phone_number)"
+            :fallback-class="'text-lg bg-gradient-to-br text-white ' + getAvatarGradient(contact.name || contact.phone_number)"
+          />
           <h4 class="font-medium">
             {{ contact.name || contact.phone_number }}
           </h4>

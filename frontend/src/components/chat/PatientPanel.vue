@@ -9,7 +9,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import PatientAvatar from '@/components/shared/PatientAvatar.vue'
 import { clinicService, apiAssetUrl } from '@/services/api'
 import { getInitials, getAvatarGradient } from '@/lib/utils'
 import { getErrorMessage } from '@/lib/api-utils'
@@ -250,12 +250,14 @@ const frappeUrl = computed(() => patient.value && clinic.context?.frappe_url
           </div>
 
           <div class="flex items-start gap-3">
-            <Avatar v-if="contact.avatar_url" class="h-12 w-12 shrink-0 ring-2 ring-white/[0.1] light:ring-gray-200">
-              <AvatarImage :src="patientPhoto" :alt="patient.patient_name" />
-              <AvatarFallback :class="'text-sm bg-gradient-to-br text-white ' + getAvatarGradient(patient.patient_name)">
-                {{ getInitials(patient.patient_name) }}
-              </AvatarFallback>
-            </Avatar>
+            <PatientAvatar
+              v-if="contact.avatar_url"
+              class="h-12 w-12 shrink-0 ring-2 ring-white/[0.1] light:ring-gray-200"
+              :src="patientPhoto"
+              :name="patient.patient_name"
+              :initials="getInitials(patient.patient_name)"
+              :fallback-class="'text-sm bg-gradient-to-br text-white ' + getAvatarGradient(patient.patient_name)"
+            />
             <div class="min-w-0">
             <p class="text-sm font-semibold" dir="auto">{{ patient.patient_name }}</p>
             <p class="text-muted-foreground flex flex-wrap gap-x-2 mt-0.5">

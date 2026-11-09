@@ -72,7 +72,7 @@ func (a *App) ContactPhoto(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Contact not found", nil, "")
 	}
 	patient := string(r.RequestCtx.QueryArgs().Peek("patient"))
-	return a.sendPhoto(r, orgID, userID, contact.PhoneNumber, patient)
+	return a.sendPhoto(r, orgID, userID, contact.PhoneNumber, patient, photoSize(r))
 }
 
 // MobileCallPhoto serves the caller's photo to the phone's ringing screen,
@@ -93,18 +93,27 @@ func (a *App) MobileCallPhoto(r *fastglue.Request) error {
 	if err := a.DB.Select("id", "organization_id", "contact_id", "caller_phone").Where("id = ?", transferID).First(&transfer).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Call not found", nil, "")
 	}
-	return a.sendPhoto(r, transfer.OrganizationID, userID, transfer.CallerPhone, "")
+	return a.sendPhoto(r, transfer.OrganizationID, userID, transfer.CallerPhone, "", photoSize(r))
 }
 
-func (a *App) sendPhoto(r *fastglue.Request, orgID, userID uuid.UUID, phone, patient string) error {
-	image, version := a.clinicPhoto(context.Background(), orgID, userID, phone, patient)
+// photoSize is "large" for the whole photo to view full screen, else the
+// small square for avatars.
+func photoSize(r *fastglue.Request) string {
+	if string(r.RequestCtx.QueryArgs().Peek("size")) == "large" {
+		return "large"
+	}
+	return ""
+}
+
+func (a *App) sendPhoto(r *fastglue.Request, orgID, userID uuid.UUID, phone, patient, size string) error {
+	image, version := a.clinicPhoto(context.Background(), orgID, userID, phone, patient, size)
 	if image == nil {
 		// Not kept by the browser: the answer changes when the person is
 		// linked to another staff login, and the server already remembers it.
 		r.RequestCtx.Response.Header.Set("Cache-Control", "no-store")
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "No photo", nil, "")
 	}
-	etag := `"` + version + `"`
+	etag := `"` + version + size + `"`
 	r.RequestCtx.Response.Header.Set("Cache-Control", fmt.Sprintf("private, max-age=%d", photoBrowserAge))
 	r.RequestCtx.Response.Header.Set("ETag", etag)
 	if string(r.RequestCtx.Request.Header.Peek("If-None-Match")) == etag {
@@ -116,23 +125,23 @@ func (a *App) sendPhoto(r *fastglue.Request, orgID, userID uuid.UUID, phone, pat
 	return nil
 }
 
-func photoLookupKey(userID uuid.UUID, phone, patient string) string {
-	return fmt.Sprintf("clinic:photo:who:%s:%s:%s", userID, phone, patient)
+func photoLookupKey(userID uuid.UUID, phone, patient, size string) string {
+	return fmt.Sprintf("clinic:photo:who:%s:%s:%s:%s", userID, phone, patient, size)
 }
 
-func photoImageKey(orgID uuid.UUID, version string) string {
-	return fmt.Sprintf("clinic:photo:img:%s:%s", orgID, version)
+func photoImageKey(orgID uuid.UUID, version, size string) string {
+	return fmt.Sprintf("clinic:photo:img:%s:%s:%s", orgID, version, size)
 }
 
 // clinicPhoto returns the photo and its version, from the cache when it can.
-func (a *App) clinicPhoto(ctx context.Context, orgID, userID uuid.UUID, phone, patient string) ([]byte, string) {
-	lookup := photoLookupKey(userID, phone, patient)
+func (a *App) clinicPhoto(ctx context.Context, orgID, userID uuid.UUID, phone, patient, size string) ([]byte, string) {
+	lookup := photoLookupKey(userID, phone, patient, size)
 	if a.Redis != nil {
 		if version, err := a.Redis.Get(ctx, lookup).Result(); err == nil {
 			if version == photoNone {
 				return nil, ""
 			}
-			if image, err := a.Redis.Get(ctx, photoImageKey(orgID, version)).Bytes(); err == nil {
+			if image, err := a.Redis.Get(ctx, photoImageKey(orgID, version, size)).Bytes(); err == nil {
 				return image, version
 			}
 		}
@@ -157,7 +166,7 @@ func (a *App) clinicPhoto(ctx context.Context, orgID, userID uuid.UUID, phone, p
 	}
 	status, data, _ := a.callClinic(a.Config.Clinic, clinicRequest{
 		Action:     "photo",
-		Args:       map[string]any{"phone": phone, "patient": patient},
+		Args:       photoArgs(phone, patient, size),
 		ActingUser: clinicLogin(user),
 		Timestamp:  time.Now().Unix(),
 	})
@@ -172,13 +181,28 @@ func (a *App) clinicPhoto(ctx context.Context, orgID, userID uuid.UUID, phone, p
 	}
 	_ = json.Unmarshal(data, &found)
 	image, err := base64.StdEncoding.DecodeString(found.Data)
-	if found.Data == "" || !photoVersion.MatchString(found.Version) || err != nil || len(image) > photoMaxBytes {
+	if found.Data == "" || !photoVersion.MatchString(found.Version) || err != nil || len(image) > maxPhotoBytes(size) {
 		remember(photoNone, photoMissingTTL)
 		return nil, ""
 	}
 	if a.Redis != nil {
-		a.Redis.Set(ctx, photoImageKey(orgID, found.Version), image, photoImageTTL)
+		a.Redis.Set(ctx, photoImageKey(orgID, found.Version, size), image, photoImageTTL)
 	}
 	remember(found.Version, photoLookupTTL)
 	return image, found.Version
+}
+
+func photoArgs(phone, patient, size string) map[string]any {
+	args := map[string]any{"phone": phone, "patient": patient}
+	if size != "" {
+		args["size"] = size
+	}
+	return args
+}
+
+func maxPhotoBytes(size string) int {
+	if size == "large" {
+		return 4 * photoMaxBytes
+	}
+	return photoMaxBytes
 }
