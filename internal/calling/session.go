@@ -337,6 +337,7 @@ type orgCallingSettings struct {
 	IncomingCallMode    string // IncomingAnswer or IncomingRing
 	RingNoAnswer        string // NoAnswerHold or NoAnswerMissed
 	WaitingSound        string // "", WaitingRinging or WaitingMusic
+	DeclineEndsCall     bool   // one person declining ends the call for the caller
 }
 
 // transferRingFile returns the audio file the caller should hear while a

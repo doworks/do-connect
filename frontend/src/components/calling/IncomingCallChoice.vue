@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Label } from '@/components/ui/label'
-import { PhoneIncoming, BellRing, Music, AlertTriangle } from 'lucide-vue-next'
+import { PhoneIncoming, BellRing, Music, AlertTriangle, PhoneOff } from 'lucide-vue-next'
 
 // Settings, Calling: how incoming WhatsApp calls are answered. "answer" picks
 // up at once and the caller hears the waiting sound while staff are rung;
@@ -11,6 +11,11 @@ import { PhoneIncoming, BellRing, Music, AlertTriangle } from 'lucide-vue-next'
 const mode = defineModel<string>('mode', { required: true })
 const noAnswer = defineModel<string>('noAnswer', { required: true })
 const waitingSound = defineModel<string>('waitingSound', { required: true })
+const declineEndsCall = defineModel<boolean>('declineEndsCall', { required: true })
+const declineChoice = computed({
+  get: () => (declineEndsCall.value ? 'end' : 'others'),
+  set: (value: string) => { declineEndsCall.value = value === 'end' },
+})
 const props = defineProps<{ hasHoldMusic: boolean; hasRingback: boolean }>()
 
 // Callers hear something whenever the call is answered before staff pick up.
@@ -101,6 +106,28 @@ const soundFallsBack = computed(() =>
       <p v-else-if="soundFallsBack" class="text-xs text-white/40 light:text-gray-500">
         {{ sound === 'music' ? $t('callAnswer.noMusicYet') : $t('callAnswer.noRingingYet') }}
       </p>
+    </div>
+
+    <div class="space-y-2 pt-1">
+      <p class="text-sm text-white/70 light:text-gray-700 flex items-center gap-2">
+        <PhoneOff class="h-4 w-4 text-rose-400 light:text-rose-600" />{{ $t('callAnswer.declineTitle') }}
+      </p>
+      <RadioGroup v-model="declineChoice" class="grid gap-1.5 ml-6">
+        <div class="flex items-start gap-2">
+          <RadioGroupItem id="decline-others" value="others" class="mt-0.5" />
+          <Label for="decline-others" class="font-normal cursor-pointer leading-snug">
+            {{ $t('callAnswer.declineOthers') }}
+            <span class="block text-xs text-white/40 light:text-gray-500">{{ $t('callAnswer.declineOthersHint') }}</span>
+          </Label>
+        </div>
+        <div class="flex items-start gap-2">
+          <RadioGroupItem id="decline-end" value="end" class="mt-0.5" />
+          <Label for="decline-end" class="font-normal cursor-pointer leading-snug">
+            {{ $t('callAnswer.declineEnd') }}
+            <span class="block text-xs text-white/40 light:text-gray-500">{{ $t('callAnswer.declineEndHint') }}</span>
+          </Label>
+        </div>
+      </RadioGroup>
     </div>
   </div>
 </template>

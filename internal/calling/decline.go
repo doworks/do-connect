@@ -50,7 +50,9 @@ func (m *Manager) noteOffered(payload map[string]any, ids []uuid.UUID, everyone 
 // Their phones and browsers stop ringing; the call carries on for anyone else
 // it was offered to. Once everyone it was offered to has declined, it ends
 // for the caller as a missed call. In a team rotation the next person is rung
-// when this one's turn runs out, as before.
+// when this one's turn runs out, as before. An organization can instead have
+// any one decline end the call (Settings, Calling), e.g. when a single phone
+// takes all calls.
 func (m *Manager) DeclineTransfer(transferID, userID uuid.UUID) {
 	session := m.findSessionByTransferID(transferID)
 	if session == nil {
@@ -74,6 +76,9 @@ func (m *Manager) DeclineTransfer(transferID, userID uuid.UUID) {
 	orgID := session.OrganizationID
 	inIVR := session.TransferDone != nil
 	session.mu.Unlock()
+	if m.getOrgCallingSettings(orgID).DeclineEndsCall {
+		everyoneDeclined = true
+	}
 
 	if m.wsHub != nil {
 		m.wsHub.BroadcastToUser(orgID, userID, websocket.WSMessage{

@@ -161,6 +161,9 @@ func (m *Manager) applyOrgOverrides(s *orgCallingSettings, settings map[string]a
 	if v, ok := settings["waiting_sound"].(string); ok && ValidWaitingSound(v) {
 		s.WaitingSound = v
 	}
+	if v, ok := settings["decline_ends_call"].(bool); ok {
+		s.DeclineEndsCall = v
+	}
 }
 
 // GetIVRFlowByConfig is the public wrapper for getIVRFlowByConfigCached,

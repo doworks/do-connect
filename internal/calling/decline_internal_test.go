@@ -93,6 +93,15 @@ func TestDecliningACall(t *testing.T) {
 		assert.Equal(t, models.CallTransferStatusWaiting, status(f))
 	})
 
+	t.Run("a clinic can have any one decline end the call for the caller", func(t *testing.T) {
+		f := newRingFixture(t, models.JSONB{"incoming_call_mode": "ring", "decline_ends_call": true})
+		a, b := uuid.New(), uuid.New()
+		f.m.offerToUsers(f.org.ID, []uuid.UUID{a, b}, offer(f))
+		f.m.DeclineTransfer(f.session.TransferID, a)
+		assert.Equal(t, models.CallTransferStatusNoAnswer, status(f))
+		assert.Equal(t, []string{"reject"}, f.api.sent())
+	})
+
 	t.Run("declining stops the decliner's phones", func(t *testing.T) {
 		f := newRingFixture(t, ring)
 		phones := &fakePhones{}

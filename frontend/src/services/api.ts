@@ -822,6 +822,7 @@ export const organizationService = {
     incoming_call_mode?: string
     ring_no_answer?: string
     waiting_sound?: string
+    decline_ends_call?: boolean
     meta_app_id?: string
     meta_config_id?: string
     meta_app_secret?: string

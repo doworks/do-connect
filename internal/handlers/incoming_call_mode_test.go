@@ -41,11 +41,13 @@ func TestIncomingCallModeSetting(t *testing.T) {
 		assert.Equal(t, "answer", s.IncomingCallMode)
 		assert.Equal(t, "hold", s.RingNoAnswer)
 		assert.Empty(t, s.WaitingSound)
+		assert.False(t, s.DeclineEndsCall, "declining leaves the call ringing for the others")
 	})
 
 	t.Run("the choice is saved", func(t *testing.T) {
-		require.Equal(t, fasthttp.StatusOK, save(t, map[string]any{"incoming_call_mode": "ring", "ring_no_answer": "missed", "waiting_sound": "music"}))
+		require.Equal(t, fasthttp.StatusOK, save(t, map[string]any{"incoming_call_mode": "ring", "ring_no_answer": "missed", "waiting_sound": "music", "decline_ends_call": true}))
 		s := read(t)
+		assert.True(t, s.DeclineEndsCall)
 		assert.Equal(t, "ring", s.IncomingCallMode)
 		assert.Equal(t, "missed", s.RingNoAnswer)
 		assert.Equal(t, "music", s.WaitingSound)

@@ -2890,6 +2890,11 @@
     "soundMusic": "Hold music",
     "soundMissing": "Upload a ringback tone or hold music below, or the patient hears silence.",
     "noMusicYet": "No hold music uploaded yet, so the ringing tone plays until you upload some below.",
-    "noRingingYet": "No ringing tone uploaded yet, so the hold music plays until you upload one below."
+    "noRingingYet": "No ringing tone uploaded yet, so the hold music plays until you upload one below.",
+    "declineTitle": "When someone declines a call:",
+    "declineOthers": "It keeps ringing for the others",
+    "declineOthersHint": "It ends for the patient, as a missed call, once everyone it rang for has declined.",
+    "declineEnd": "It ends for the patient at once",
+    "declineEndHint": "For a clinic where one person or one phone takes all calls."
   }
 }

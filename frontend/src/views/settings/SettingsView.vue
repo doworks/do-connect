@@ -71,7 +71,8 @@ const callingSettings = ref({
   ringback_file: '',
   incoming_call_mode: 'answer',
   ring_no_answer: 'hold',
-  waiting_sound: ''
+  waiting_sound: '',
+  decline_ends_call: false
 })
 
 const isUploadingHoldMusic = ref(false)
@@ -125,7 +126,8 @@ onMounted(async () => {
         ringback_file: orgData.settings?.ringback_file || '',
         incoming_call_mode: orgData.settings?.incoming_call_mode || 'answer',
         ring_no_answer: orgData.settings?.ring_no_answer || 'hold',
-        waiting_sound: orgData.settings?.waiting_sound || ''
+        waiting_sound: orgData.settings?.waiting_sound || '',
+        decline_ends_call: orgData.settings?.decline_ends_call === true
       }
     }
 
@@ -213,7 +215,8 @@ async function saveCallingSettings() {
       transfer_timeout_secs: callingSettings.value.transfer_timeout_secs,
       incoming_call_mode: callingSettings.value.incoming_call_mode,
       ring_no_answer: callingSettings.value.ring_no_answer,
-      waiting_sound: callingSettings.value.waiting_sound
+      waiting_sound: callingSettings.value.waiting_sound,
+      decline_ends_call: callingSettings.value.decline_ends_call
     })
     toast.success(t('settings.callingSaved'))
     refreshActivityLog(callingLogKey)
@@ -546,6 +549,7 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
                   v-model:mode="callingSettings.incoming_call_mode"
                   v-model:no-answer="callingSettings.ring_no_answer"
                   v-model:waiting-sound="callingSettings.waiting_sound"
+                  v-model:decline-ends-call="callingSettings.decline_ends_call"
                   :has-hold-music="!!callingSettings.hold_music_file"
                   :has-ringback="!!callingSettings.ringback_file"
                   :class="{ 'opacity-50 pointer-events-none': !callingSettings.calling_enabled }"
