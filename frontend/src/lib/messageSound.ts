@@ -149,23 +149,42 @@ export function presenceChanged(openContact: string | null) {
 /**
  * True for the one tab that should play the sound for this message. A tab the
  * browser won't let play sound yet (never clicked) leaves it to the others.
+ *
+ * The browser's lock manager decides: storage reaches other tabs a moment
+ * late, so two tabs could both read "not heard yet". The winner holds a lock
+ * named after the message for a few seconds, and also notes it in storage
+ * for any tab that hears about the message later.
  */
 async function claim(key: string): Promise<boolean> {
-  const take = () => {
-    const heard = readJSON<string[]>(HEARD_KEY) || []
-    if (heard.includes(key)) return false
-    writeJSON(HEARD_KEY, [...heard.slice(-49), key])
-    return true
-  }
+  if (heardBy(key)) return false
   const locks = (navigator as any).locks
   if (locks?.request) {
     try {
-      return await locks.request('doconnect.sound', take)
+      return await new Promise<boolean>((resolve, reject) => {
+        locks.request(`doconnect.sound.${key}`, { ifAvailable: true }, async (lock: unknown) => {
+          if (!lock || heardBy(key)) {
+            resolve(false)
+            return
+          }
+          markHeard(key)
+          resolve(true)
+          await new Promise(done => setTimeout(done, HOLD_MS))
+        }).catch(reject)
+      })
     } catch {
       // Fall through to deciding alone.
     }
   }
-  return take()
+  if (heardBy(key)) return false
+  markHeard(key)
+  return true
+}
+
+const HOLD_MS = 5000
+
+function markHeard(key: string) {
+  const heard = readJSON<string[]>(HEARD_KEY) || []
+  writeJSON(HEARD_KEY, [...heard.slice(-49), key])
 }
 
 function heardBy(key: string): boolean {
