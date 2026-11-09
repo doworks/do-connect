@@ -3,6 +3,8 @@ package calling
 import (
 	"context"
 	"fmt"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -281,9 +283,21 @@ func createOpusTrack(pc *webrtc.PeerConnection, streamID string) (*webrtc.TrackL
 // createPeerConnection creates a new WebRTC peer connection with Opus codec support
 func (m *Manager) createPeerConnection() (*webrtc.PeerConnection, error) {
 	now := time.Now()
+	// With the public address set, the host candidate already is the address
+	// WhatsApp reaches. A STUN candidate for the same address on another port
+	// gives WhatsApp two paths to one call, and DTLS handshake records split
+	// across them end in "DecryptError" and a call that drops while ringing.
+	knownAddress := m.config.PublicIP != "" && !m.config.RelayOnly
 	iceServers := make([]webrtc.ICEServer, 0, len(m.config.ICEServers))
 	for _, s := range m.config.ICEServers {
-		ice := webrtc.ICEServer{URLs: s.URLs}
+		urls := s.URLs
+		if knownAddress {
+			urls = withoutSTUN(urls)
+			if len(urls) == 0 {
+				continue
+			}
+		}
+		ice := webrtc.ICEServer{URLs: urls}
 		if username, credential := s.ResolveCredentials(now); username != "" {
 			ice.Username = username
 			ice.Credential = credential
@@ -344,7 +358,12 @@ func (m *Manager) createPeerConnection() (*webrtc.PeerConnection, error) {
 	// On cloud/AWS, map private IP to public IP so ICE candidates
 	// advertise the reachable address instead of the internal one.
 	// Skip when relay_only — host candidates are not used in relay mode.
-	if m.config.PublicIP != "" && !m.config.RelayOnly {
+	if knownAddress {
+		// Only the public address's own family: an IPv6 path that can't be
+		// reached is one more candidate for nothing.
+		if ip := net.ParseIP(m.config.PublicIP); ip != nil && ip.To4() != nil {
+			settingEngine.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+		}
 		if err := settingEngine.SetICEAddressRewriteRules(webrtc.ICEAddressRewriteRule{
 			External:        []string{m.config.PublicIP},
 			AsCandidateType: webrtc.ICECandidateTypeHost,
@@ -471,4 +490,17 @@ func (m *Manager) rejectCall(ctx context.Context, account *whatsapp.Account, cal
 	if err := m.whatsapp.RejectCall(ctx, account, callID); err != nil {
 		m.log.Error("Failed to reject call", "error", err, "call_id", callID)
 	}
+}
+
+// withoutSTUN keeps the TURN addresses of an ICE server entry.
+func withoutSTUN(urls []string) []string {
+	kept := make([]string, 0, len(urls))
+	for _, u := range urls {
+		lower := strings.ToLower(u)
+		if strings.HasPrefix(lower, "stun:") || strings.HasPrefix(lower, "stuns:") {
+			continue
+		}
+		kept = append(kept, u)
+	}
+	return kept
 }
