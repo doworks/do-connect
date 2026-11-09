@@ -146,3 +146,19 @@ func TestLoadLogo(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
+
+func TestHandler_ServesFilesUnderTheBasePath(t *testing.T) {
+	fs := testFS()
+	fs["sounds/chime.wav"] = &fstest.MapFile{Data: []byte("RIFF-chime")}
+	h := newHandler(fs, "/whatomate", Brand{Name: "Acme Inbox"})
+
+	for _, path := range []string{"/whatomate/sounds/chime.wav", "/sounds/chime.wav"} {
+		ctx := get(t, h, path)
+		assert.Equal(t, fasthttp.StatusOK, ctx.Response.StatusCode(), path)
+		assert.Equal(t, "RIFF-chime", string(ctx.Response.Body()), path)
+		assert.Equal(t, "audio/wav", string(ctx.Response.Header.ContentType()), path)
+	}
+	// Anything else under the base path is still the app's page.
+	ctx := get(t, h, "/whatomate/chat/123")
+	assert.Contains(t, string(ctx.Response.Body()), `window.__BASE_PATH__ = "/whatomate"`)
+}

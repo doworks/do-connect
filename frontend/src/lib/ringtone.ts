@@ -7,11 +7,14 @@
 
 import { useAuthStore, type CallRingtone } from '@/stores/auth'
 
+// Served under the base path when the app lives at e.g. /whatomate.
+const BASE = (((window as any).__BASE_PATH__ ?? '') as string).replace(/\/$/, '')
+
 const SOURCES: Record<Exclude<CallRingtone, 'none'>, string> = {
   // Two-tone ring with a 2s gap, so looping sounds like a phone ringing.
-  ring: '/ringtone.wav',
+  ring: BASE + '/ringtone.wav',
   // The message beep, for agents who'd rather keep the old sound.
-  beep: '/notification.mp3',
+  beep: BASE + '/notification.mp3',
 }
 
 const DEFAULT_RINGTONE: CallRingtone = 'ring'

@@ -166,6 +166,12 @@ func newHandler(distSubFS fs.FS, basePath string, brand Brand) fasthttp.RequestH
 			return
 		}
 
+		// Under a base path the page asks for its files there too
+		// (e.g. /whatomate/sounds/chime.wav), unless a proxy already strips it.
+		if basePath != "" && strings.HasPrefix(path, basePath+"/") && !strings.HasPrefix(path, basePath+"/api") {
+			path = strings.TrimPrefix(path, basePath)
+		}
+
 		// Try to serve the file
 		if path != "/" && !strings.HasPrefix(path, "/api") {
 			// Check if file exists
