@@ -2929,5 +2929,27 @@
     "saved": "Message sound saved",
     "saveFailed": "Couldn't save the message sound",
     "blocked": "Click anywhere in Whatomate once to let it play message sounds."
+  },
+  "clinicLink": {
+    "title": "Clinic system login",
+    "desc": "The patient panel and patient photos act as this staff login in the clinic system, with its permissions.",
+    "actsAs": "Acts as {name}",
+    "notLinked": "Not linked",
+    "notLinkedHint": "The clinic system has no active staff login with {email}, so the patient panel and photos don't work for this user. Link them to their staff login.",
+    "choose": "Link to a staff login",
+    "change": "Link to another staff login",
+    "useOwn": "Use their own email ({email})",
+    "searchPlaceholder": "Search staff by name or email",
+    "searching": "Searching…",
+    "noStaff": "No active staff login matches.",
+    "current": "Current",
+    "warning": "They'll see and do in the patient panel what that staff login is allowed to.",
+    "linked": "Linked to {name}",
+    "unlinked": "Back to their own email",
+    "loadFailed": "Couldn't check the clinic system",
+    "searchFailed": "Couldn't search the clinic system",
+    "saveFailed": "Couldn't save the link",
+    "notLinkedBadge": "Not linked to clinic",
+    "notLinkedCount": "{count} user isn't linked to a clinic system login | {count} users aren't linked to a clinic system login"
   }
 }

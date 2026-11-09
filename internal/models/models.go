@@ -115,6 +115,9 @@ type User struct {
 	IsActive       bool       `gorm:"default:true" json:"is_active"`
 	IsAvailable    bool       `gorm:"default:true" json:"is_available"`    // Agent availability status (away/available)
 	IsSuperAdmin   bool       `gorm:"default:false" json:"is_super_admin"` // Super admin can access all organizations
+	// ClinicUser is the clinic system login this user acts as in the patient
+	// panel, when it differs from Email. Empty means the same email.
+	ClinicUser string `gorm:"size:255" json:"clinic_user,omitempty"`
 
 	// SSO fields
 	SSOProvider   string `gorm:"size:50" json:"sso_provider,omitempty"`     // google, microsoft, github, facebook, custom

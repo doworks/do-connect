@@ -99,7 +99,9 @@ func (a *App) MobileCallPhoto(r *fastglue.Request) error {
 func (a *App) sendPhoto(r *fastglue.Request, orgID, userID uuid.UUID, phone, patient string) error {
 	image, version := a.clinicPhoto(context.Background(), orgID, userID, phone, patient)
 	if image == nil {
-		r.RequestCtx.Response.Header.Set("Cache-Control", "private, max-age=600")
+		// Not kept by the browser: the answer changes when the person is
+		// linked to another staff login, and the server already remembers it.
+		r.RequestCtx.Response.Header.Set("Cache-Control", "no-store")
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "No photo", nil, "")
 	}
 	etag := `"` + version + `"`
@@ -142,7 +144,7 @@ func (a *App) clinicPhoto(ctx context.Context, orgID, userID uuid.UUID, phone, p
 		}
 	}
 	var user models.User
-	if err := a.DB.Select("id", "email").Where("id = ?", userID).First(&user).Error; err != nil || user.Email == "" {
+	if err := a.DB.Select("id", "email", "clinic_user").Where("id = ?", userID).First(&user).Error; err != nil || user.Email == "" {
 		remember(photoNone, photoMissingTTL)
 		return nil, ""
 	}
@@ -156,7 +158,7 @@ func (a *App) clinicPhoto(ctx context.Context, orgID, userID uuid.UUID, phone, p
 	status, data, _ := a.callClinic(a.Config.Clinic, clinicRequest{
 		Action:     "photo",
 		Args:       map[string]any{"phone": phone, "patient": patient},
-		ActingUser: user.Email,
+		ActingUser: clinicLogin(user),
 		Timestamp:  time.Now().Unix(),
 	})
 	if status != fasthttp.StatusOK {

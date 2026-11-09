@@ -75,7 +75,7 @@ func (a *App) SaveMessageToClinic(r *fastglue.Request) error {
 	}
 
 	var user models.User
-	if err := a.DB.Select("id", "email", "full_name").Where("id = ?", userID).First(&user).Error; err != nil || user.Email == "" {
+	if err := a.DB.Select("id", "email", "full_name", "clinic_user").Where("id = ?", userID).First(&user).Error; err != nil || user.Email == "" {
 		return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Your account has no email to match in the clinic system", nil, "")
 	}
 
@@ -92,7 +92,7 @@ func (a *App) SaveMessageToClinic(r *fastglue.Request) error {
 			"received_on":  message.CreatedAt.Format("2006-01-02"),
 			"caption":      message.Content,
 		},
-		ActingUser: user.Email,
+		ActingUser: clinicLogin(user),
 		Timestamp:  time.Now().Unix(),
 	})
 	if status != fasthttp.StatusOK {

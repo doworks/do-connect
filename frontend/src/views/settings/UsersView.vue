@@ -16,7 +16,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useRolesStore } from '@/stores/roles'
 import { useOrganizationsStore } from '@/stores/organizations'
 import { toast } from 'vue-sonner'
-import { Plus, Pencil, Trash2, UserMinus, User as UserIcon, Shield, ShieldCheck, UserCog, Users, Link, UserPlus, Loader2 } from 'lucide-vue-next'
+import { clinicLinksService, type ClinicLink } from '@/services/api'
+import { Plus, Pencil, Trash2, UserMinus, User as UserIcon, Shield, ShieldCheck, UserCog, Users, Link, UserPlus, Loader2, AlertTriangle } from 'lucide-vue-next'
 import { useCrudState } from '@/composables/useCrudState'
 import { getErrorMessage } from '@/lib/api-utils'
 import { formatDate } from '@/lib/utils'
@@ -88,7 +89,19 @@ const getDefaultRoleId = () => rolesStore.roles.find(r => r.name === 'agent' && 
 function openCreateDialog() { formData.value.role_id = getDefaultRoleId(); baseOpenCreateDialog() }
 
 watch(() => organizationsStore.selectedOrgId, () => { fetchUsers(); rolesStore.fetchRoles() })
-onMounted(() => { fetchUsers(); rolesStore.fetchRoles() })
+onMounted(() => { fetchUsers(); rolesStore.fetchRoles(); loadClinicLinks() })
+
+// Users the patient panel can't act for in the clinic system.
+const unlinked = ref(new Set<string>())
+async function loadClinicLinks() {
+  try {
+    const response = await clinicLinksService.links()
+    const links: ClinicLink[] = (response.data.data || response.data).links || []
+    unlinked.value = new Set(links.filter(l => !l.linked).map(l => l.user_id))
+  } catch {
+    unlinked.value = new Set()
+  }
+}
 
 async function fetchUsers() {
   isLoading.value = true
@@ -233,6 +246,7 @@ async function copyInviteLink() {
                     </Badge>
                   </div>
                   <CardDescription>{{ $t('users.subtitle') }}. <RouterLink to="/settings/roles" class="text-primary hover:underline">{{ $t('users.manageRoles') }}</RouterLink></CardDescription>
+                  <p v-if="unlinked.size" class="mt-1 text-xs font-medium text-amber-400 light:text-amber-700" data-test="not-linked-count">{{ $t('clinicLink.notLinkedCount', unlinked.size) }}</p>
                 </div>
                 <div class="flex items-center gap-3 flex-wrap">
                   <Select v-model="roleFilter">
@@ -273,6 +287,9 @@ async function copyInviteLink() {
                 </template>
                 <template #cell-email="{ item: user }">
                   <span class="text-sm text-muted-foreground truncate">{{ user.email }}</span>
+                  <span v-if="unlinked.has(user.id)" class="flex items-center gap-1 text-[11px] font-medium text-amber-400 light:text-amber-700" data-test="not-linked">
+                    <AlertTriangle class="h-3 w-3" />{{ $t('clinicLink.notLinkedBadge') }}
+                  </span>
                 </template>
                 <template #cell-role="{ item: user }">
                   <Badge :variant="getRoleBadgeVariant(getRoleName(user))" class="capitalize">{{ getRoleName(user) }}</Badge>

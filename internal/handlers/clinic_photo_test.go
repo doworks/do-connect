@@ -127,7 +127,7 @@ func TestContactPhoto(t *testing.T) {
 			before := fc.count("photo")
 			req := f.photo(t, f.user, contact.ID, "")
 			assert.Equal(t, fasthttp.StatusNotFound, testutil.GetResponseStatusCode(req), reply.body)
-			assert.Contains(t, string(req.RequestCtx.Response.Header.Peek("Cache-Control")), "max-age")
+			assert.Equal(t, "no-store", string(req.RequestCtx.Response.Header.Peek("Cache-Control")))
 			f.photo(t, f.user, contact.ID, "")
 			assert.Equal(t, before+1, fc.count("photo"), reply.body)
 		}

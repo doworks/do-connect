@@ -12,6 +12,7 @@ import DetailPageLayout from '@/components/shared/DetailPageLayout.vue'
 import MetadataPanel from '@/components/shared/MetadataPanel.vue'
 import AuditLogPanel from '@/components/shared/AuditLogPanel.vue'
 import SignedInPhones from '@/components/shared/SignedInPhones.vue'
+import ClinicLinkCard from '@/components/shared/ClinicLinkCard.vue'
 import UnsavedChangesDialog from '@/components/shared/UnsavedChangesDialog.vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -286,6 +287,14 @@ onMounted(async () => {
           </div>
         </CardContent>
       </Card>
+
+      <!-- The clinic system staff login the patient panel acts as -->
+      <ClinicLinkCard
+        v-if="user"
+        :user-id="user.id"
+        :user-email="user.email"
+        :can-write="canWrite"
+      />
 
       <!-- Phones signed in with the mobile app -->
       <SignedInPhones

@@ -176,6 +176,15 @@ export interface MobileDevice {
   last_seen_at: string
 }
 
+// Which clinic system staff login each user acts as in the patient panel.
+export interface ClinicStaff { email: string; full_name: string; roles: string[]; more_roles: number }
+export interface ClinicLink { user_id: string; clinic_user: string; acts_as: string; linked: boolean; staff_name?: string }
+export const clinicLinksService = {
+  links: () => api.get('/clinic-links'),
+  searchStaff: (search: string) => api.get('/clinic-staff', { params: { search } }),
+  link: (userId: string, clinicUser: string) => api.put(`/users/${userId}/clinic-user`, { clinic_user: clinicUser }),
+}
+
 export const mobileDevicesService = {
   list: (params?: { scope?: 'mine'; user_id?: string }) => api.get('/mobile/devices', { params }),
   remove: (id: string) => api.delete(`/mobile/devices/${id}`),

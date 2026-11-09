@@ -48,6 +48,7 @@ type UserResponse struct {
 	IsAvailable    bool         `json:"is_available"`
 	IsSuperAdmin   bool         `json:"is_super_admin"`
 	IsMember       bool         `json:"is_member"`
+	ClinicUser     string       `json:"clinic_user,omitempty"`
 	OrganizationID uuid.UUID    `json:"organization_id"`
 	Settings       models.JSONB `json:"settings,omitempty"`
 	CreatedAt      string       `json:"created_at"`
@@ -859,6 +860,7 @@ func userToResponse(user models.User) UserResponse {
 		IsActive:       user.IsActive,
 		IsAvailable:    user.IsAvailable,
 		IsSuperAdmin:   user.IsSuperAdmin,
+		ClinicUser:     user.ClinicUser,
 		OrganizationID: user.OrganizationID,
 		Settings:       user.Settings,
 		CreatedAt:      user.CreatedAt.Format("2006-01-02T15:04:05Z"),

@@ -84,9 +84,9 @@ func (a *App) ClinicProxy(r *fastglue.Request) error {
 	}
 
 	var user models.User
-	if err := a.DB.Select("id", "email").Where("id = ? AND organization_id = ?", userID, orgID).First(&user).Error; err != nil || user.Email == "" {
+	if err := a.DB.Select("id", "email", "clinic_user").Where("id = ? AND organization_id = ?", userID, orgID).First(&user).Error; err != nil || user.Email == "" {
 		// Super admins can belong to several organisations; fall back to the user alone.
-		if err := a.DB.Select("id", "email").Where("id = ?", userID).First(&user).Error; err != nil || user.Email == "" {
+		if err := a.DB.Select("id", "email", "clinic_user").Where("id = ?", userID).First(&user).Error; err != nil || user.Email == "" {
 			return r.SendErrorEnvelope(fasthttp.StatusForbidden, "Your account has no email to match in the clinic system", nil, "")
 		}
 	}
@@ -105,7 +105,7 @@ func (a *App) ClinicProxy(r *fastglue.Request) error {
 	status, data, message := a.callClinic(cfg, clinicRequest{
 		Action:     action,
 		Args:       args,
-		ActingUser: user.Email,
+		ActingUser: clinicLogin(user),
 		Timestamp:  time.Now().Unix(),
 	})
 	if status != fasthttp.StatusOK {
