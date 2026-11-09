@@ -36,6 +36,8 @@ var mimeTypes = map[string]string{
 	".woff2": "font/woff2",
 	".ttf":   "font/ttf",
 	".eot":   "application/vnd.ms-fontobject",
+	".wav":   "audio/wav",
+	".mp3":   "audio/mpeg",
 }
 
 //go:embed all:dist

@@ -770,10 +770,13 @@ func (a *App) UpdateCurrentUserSettings(r *fastglue.Request) error {
 // a user's JSONB settings into a map suitable for audit diffing.
 func notificationSettingsSnapshot(settings models.JSONB) map[string]any {
 	return map[string]any{
-		"email_notifications": settings["email_notifications"],
-		"new_message_alerts":  settings["new_message_alerts"],
-		"campaign_updates":    settings["campaign_updates"],
-		"call_ringtone":       settings["call_ringtone"],
+		"email_notifications":  settings["email_notifications"],
+		"new_message_alerts":   settings["new_message_alerts"],
+		"campaign_updates":     settings["campaign_updates"],
+		"call_ringtone":        settings["call_ringtone"],
+		"message_sound":        settings["message_sound"],
+		"message_sound_volume": settings["message_sound_volume"],
+		"message_sound_when":   settings["message_sound_when"],
 	}
 }
 

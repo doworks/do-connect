@@ -6,20 +6,18 @@ import { useNotesStore } from '@/stores/notes'
 import { contactsService } from '@/services/api'
 import { toast } from 'vue-sonner'
 import router from '@/router'
+import { i18n } from '@/i18n'
+import { useMessageSoundStore } from '@/stores/messageSound'
+import { playSound, soundForMessage } from '@/lib/messageSound'
 
-// Notification sound
-let notificationSound: HTMLAudioElement | null = null
-
+// The message sound follows the clinic's and the person's settings.
 function playNotificationSound() {
-  if (!notificationSound) {
-    const basePath = ((window as any).__BASE_PATH__ ?? '').replace(/\/$/, '')
-    notificationSound = new Audio(`${basePath}/notification.mp3`)
-    notificationSound.volume = 0.5
-  }
-  notificationSound.currentTime = 0
-  notificationSound.play().catch(() => {
-    // Ignore autoplay errors (browser may block until user interaction)
-  })
+  const resolved = useMessageSoundStore().resolved
+  if (resolved) void playSound(resolved)
+}
+
+function soundBlockedNotice() {
+  toast.info(i18n.global.t('messageSound.blocked'), { duration: 8000 })
 }
 
 function showDesktopNotification(title: string, body: string, contactId: string) {
@@ -368,6 +366,16 @@ class WebSocketService {
     //    another window
     const userAway = typeof document !== 'undefined'
       && (document.visibilityState === 'hidden' || !document.hasFocus())
+
+    // The message sound has its own settings, and the tabs agree on it: it
+    // sounds once, and not for a chat someone is reading.
+    if (payload.direction === 'incoming') {
+      const owner = payload.assigned_user_id
+      if (!owner || owner === useAuthStore().user?.id) {
+        void soundForMessage(String(payload.id || `${payload.contact_id}:${payload.created_at}`),
+          useMessageSoundStore().resolved, payload.contact_id, soundBlockedNotice)
+      }
+    }
     if (payload.direction === 'incoming' && (!isViewingThisContact || userAway)) {
       const authStore = useAuthStore()
       const currentUserId = authStore.user?.id
@@ -387,8 +395,6 @@ class WebSocketService {
           : messagePreview
         const contactId = payload.contact_id
 
-        // Play notification sound and show browser notification
-        playNotificationSound()
         showNotification(senderName, preview, contactId)
         if (userAway) showDesktopNotification(senderName, preview, contactId)
       }

@@ -193,6 +193,8 @@ export const usersService = {
   me: () => api.get('/me'),
   updateSettings: (data: { email_notifications: boolean; new_message_alerts: boolean; campaign_updates: boolean; call_ringtone?: string }) =>
     api.put('/me/settings', data),
+  updateMessageSound: (data: { message_sound: string; message_sound_volume: number | null; message_sound_when: string }) =>
+    api.put('/me/message-sound', data),
   changePassword: (data: { current_password: string; new_password: string }) =>
     api.put('/me/password', data),
   updateAvailability: (isAvailable: boolean) =>
@@ -830,6 +832,10 @@ export const organizationService = {
     ring_no_answer?: string
     waiting_sound?: string
     decline_ends_call?: boolean
+    message_sound_enabled?: boolean
+    message_sound?: string
+    message_sound_volume?: number
+    message_sound_when?: string
     meta_app_id?: string
     meta_config_id?: string
     meta_app_secret?: string

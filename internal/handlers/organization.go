@@ -27,16 +27,20 @@ func generalSettingsSnapshot(name string, settings models.JSONB) map[string]any 
 		}
 	}
 	return map[string]any{
-		"name":                 name,
-		"timezone":             settings["timezone"],
-		"date_format":          settings["date_format"],
-		"mask_phone_numbers":   settings["mask_phone_numbers"],
-		"default_country_code": settings["default_country_code"],
-		"unlock_template_en":   settings["unlock_template_en"],
-		"unlock_template_ar":   settings["unlock_template_ar"],
-		"meta_app_id":          settings["meta_app_id"],
-		"meta_config_id":       settings["meta_config_id"],
-		"has_meta_app_secret":  hasSecret,
+		"name":                  name,
+		"timezone":              settings["timezone"],
+		"date_format":           settings["date_format"],
+		"mask_phone_numbers":    settings["mask_phone_numbers"],
+		"default_country_code":  settings["default_country_code"],
+		"unlock_template_en":    settings["unlock_template_en"],
+		"unlock_template_ar":    settings["unlock_template_ar"],
+		"meta_app_id":           settings["meta_app_id"],
+		"meta_config_id":        settings["meta_config_id"],
+		"has_meta_app_secret":   hasSecret,
+		"message_sound_enabled": settings["message_sound_enabled"],
+		"message_sound":         settings["message_sound"],
+		"message_sound_volume":  settings["message_sound_volume"],
+		"message_sound_when":    settings["message_sound_when"],
 	}
 }
 
@@ -86,6 +90,7 @@ type OrganizationSettings struct {
 	MetaAppID        string `json:"meta_app_id"`
 	MetaConfigID     string `json:"meta_config_id"`
 	HasMetaAppSecret bool   `json:"has_meta_app_secret"`
+	MessageSoundSettings
 }
 
 // GetOrganizationSettings returns the organization settings
@@ -171,6 +176,8 @@ func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
 		}
 	}
 
+	settings.MessageSoundSettings = clinicMessageSound(org.Settings)
+
 	return r.SendEnvelope(map[string]any{
 		"settings": settings,
 		"name":     org.Name,
@@ -205,9 +212,17 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 		MetaConfigID        *string `json:"meta_config_id"`
 		MetaAppSecret       *string `json:"meta_app_secret"`
 	}
+	var sound messageSoundUpdate
 
-	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
+	body := r.RequestCtx.PostBody()
+	if err := json.Unmarshal(body, &req); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
+	}
+	if err := json.Unmarshal(body, &sound); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid request body", nil, "")
+	}
+	if problem := sound.problem(); problem != "" {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, problem, nil, "")
 	}
 
 	var org models.Organization
@@ -228,7 +243,7 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 	oldCalling := callingSettingsSnapshot(org.Settings)
 
 	// Track which tabs received updates so we only audit the relevant ones.
-	generalTouched := req.MaskPhoneNumbers != nil || req.DefaultCountryCode != nil || req.UnlockTemplateEN != nil || req.UnlockTemplateAR != nil || req.Timezone != nil || req.DateFormat != nil || (req.Name != nil && *req.Name != "") || metaAppCredsTouched
+	generalTouched := sound.touched() || req.MaskPhoneNumbers != nil || req.DefaultCountryCode != nil || req.UnlockTemplateEN != nil || req.UnlockTemplateAR != nil || req.Timezone != nil || req.DateFormat != nil || (req.Name != nil && *req.Name != "") || metaAppCredsTouched
 	callingTouched := req.CallingEnabled != nil || req.MaxCallDuration != nil || req.TransferTimeoutSecs != nil || req.HoldMusicFile != nil || req.RingbackFile != nil ||
 		req.IncomingCallMode != nil || req.RingNoAnswer != nil || req.WaitingSound != nil || req.DeclineEndsCall != nil
 	if req.IncomingCallMode != nil && !calling.ValidIncomingMode(*req.IncomingCallMode) {
@@ -308,6 +323,7 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 	if req.Name != nil && *req.Name != "" {
 		org.Name = *req.Name
 	}
+	sound.apply(org.Settings)
 
 	if err := a.DB.Save(&org).Error; err != nil {
 		a.Log.Error("Failed to update settings", "error", err)

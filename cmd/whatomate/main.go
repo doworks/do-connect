@@ -627,6 +627,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	// Current User (all authenticated users)
 	g.GET("/api/me", app.GetCurrentUser)
 	g.PUT("/api/me/settings", app.UpdateCurrentUserSettings)
+	g.PUT("/api/me/message-sound", app.UpdateMyMessageSound)
 	g.PUT("/api/me/password", app.ChangePassword)
 	g.PUT("/api/me/availability", app.UpdateAvailability)
 	g.GET("/api/me/organizations", app.ListMyOrganizations)

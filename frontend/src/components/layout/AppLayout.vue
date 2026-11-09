@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -21,6 +21,9 @@ import RefusedEventsBanner from './RefusedEventsBanner.vue'
 import { ScrollToTop } from '@/components/shared'
 import { navigationSections, type NavSection } from './navigation'
 import { brand } from '@/lib/brand'
+import { useContactsStore } from '@/stores/contacts'
+import { useMessageSoundStore } from '@/stores/messageSound'
+import { presenceChanged, trackPresence } from '@/lib/messageSound'
 
 useI18n() // Enable $t() in template
 
@@ -29,12 +32,23 @@ const router = useRouter()
 const authStore = useAuthStore()
 const isCollapsed = ref(false)
 const isMobileMenuOpen = ref(false)
+const contactsStore = useContactsStore()
+// The chat in front of the person, when this tab shows one.
+const openChat = computed(() =>
+  route.name === 'chat-conversation' || route.name === 'chat' ? contactsStore.currentContact?.id ?? null : null)
+watch(openChat, value => presenceChanged(value))
 
 // Refresh user data and connect WebSocket on mount
 onMounted(() => {
   if (authStore.isAuthenticated) {
     // Fetch fresh permissions in background (non-destructive — interceptor handles 401)
     authStore.refreshUserData()
+
+    // Message sound: the clinic's choice, and which chat this tab shows.
+    const sounds = useMessageSoundStore()
+    void sounds.load()
+    window.addEventListener('focus', () => { void sounds.load() })
+    trackPresence(() => openChat.value)
 
     wsService.connect(async () => {
       try {

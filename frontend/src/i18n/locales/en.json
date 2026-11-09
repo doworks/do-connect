@@ -2896,5 +2896,38 @@
     "declineOthersHint": "It ends for the patient, as a missed call, once everyone it rang for has declined.",
     "declineEnd": "It ends for the patient at once",
     "declineEndHint": "For a clinic where one person or one phone takes all calls."
+  },
+  "messageSound": {
+    "title": "Message sound",
+    "desc": "A soft sound when a patient sends a message, so you hear it while you work in another tab or window.",
+    "clinicTitle": "Message sound for everyone",
+    "clinicDesc": "What everyone at the clinic hears for a new message. Each person can change it for themselves in their profile.",
+    "switch": "Play a sound for new messages",
+    "switchDesc": "For chats assigned to you, and chats nobody has taken yet.",
+    "clinicSwitch": "Message sounds at this clinic",
+    "clinicSwitchDesc": "When this is off, nobody hears a message sound.",
+    "clinicOff": "Message sounds are turned off for the whole clinic. Ask an admin to turn them on in Settings, Notifications.",
+    "sound": "Sound",
+    "play": "Play the sound",
+    "volume": "Volume",
+    "useClinicVolume": "Use the clinic's level ({level}%)",
+    "clinicLevel": "The clinic's level",
+    "whenTitle": "When it plays",
+    "whenDesc": "It never plays for the chat you're reading.",
+    "clinicChoice": "Clinic's choice ({name})",
+    "sounds": {
+      "chime": "Soft chime",
+      "pop": "Pop",
+      "bell": "Glass bell",
+      "drop": "Water drop",
+      "classic": "Classic beep"
+    },
+    "when": {
+      "always": "For every new message",
+      "away": "Only when I'm away from Whatomate"
+    },
+    "saved": "Message sound saved",
+    "saveFailed": "Couldn't save the message sound",
+    "blocked": "Click anywhere in Whatomate once to let it play message sounds."
   }
 }

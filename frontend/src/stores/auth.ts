@@ -7,6 +7,9 @@ export interface UserSettings {
   new_message_alerts?: boolean
   campaign_updates?: boolean
   call_ringtone?: CallRingtone
+  message_sound?: string
+  message_sound_volume?: number | null
+  message_sound_when?: string
 }
 
 export type CallRingtone = 'ring' | 'beep' | 'none'

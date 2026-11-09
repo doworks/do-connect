@@ -15,6 +15,7 @@ import { toast } from 'vue-sonner'
 import { Settings, Bell, Loader2, Globe, Phone, Upload, Play, Pause, Music, Clock, ChevronRight } from 'lucide-vue-next'
 import { usersService, organizationService } from '@/services/api'
 import { useAuthStore, type CallRingtone } from '@/stores/auth'
+import MessageSoundSettings from '@/components/shared/MessageSoundSettings.vue'
 import { previewRingtone } from '@/lib/ringtone'
 import { isRebranded } from '@/lib/brand'
 import IncomingCallChoice from '@/components/calling/IncomingCallChoice.vue'
@@ -32,6 +33,7 @@ const orgID = computed(
 )
 const userID = computed(() => authStore.user?.id || '')
 const canWriteAccounts = computed(() => authStore.hasPermission('accounts', 'write'))
+const canWriteGeneral = computed(() => authStore.hasPermission('settings.general', 'write'))
 
 const isSubmitting = ref(false)
 const isLoading = ref(true)
@@ -93,6 +95,10 @@ const callingLogKey = ref(0)
 
 function refreshActivityLog(key: typeof generalLogKey) {
   setTimeout(() => { key.value++ }, 500)
+}
+
+function soundSaved(scope: 'personal' | 'clinic') {
+  refreshActivityLog(scope === 'clinic' ? generalLogKey : notificationLogKey)
 }
 
 onMounted(async () => {
@@ -516,6 +522,8 @@ function togglePlayAudio(type: 'hold_music' | 'ringback') {
                 </div>
               </div>
             </div>
+            <MessageSoundSettings scope="personal" class="mt-4" @saved="soundSaved('personal')" />
+            <MessageSoundSettings v-if="canWriteGeneral" scope="clinic" class="mt-4" @saved="soundSaved('clinic')" />
             <div v-if="userID" class="mt-4">
               <AuditLogPanel :key="notificationLogKey" resource-type="settings.notification" :resource-id="userID" />
             </div>
